@@ -14,11 +14,9 @@ function angDiff(a, b) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; wh
 const dampAng = (a, b, k, dt) => a + angDiff(a, b) * (1 - Math.exp(-k * dt));
 const isTouch = matchMedia('(pointer: coarse)').matches;
 const lowQ = /[?&]low/.test(location.search);
-// graphics mode: 'psx' (PlayStation-style, default) or 'hd'
-let gfxPref = null; try { gfxPref = localStorage.getItem('ch-gfx'); } catch (e) { /* storage blocked */ }
-const PSX = gfxPref !== 'hd';
-if (PSX) {
-  document.body.classList.add('psx');
+// PlayStation-style rendering (the only mode)
+const PSX = true;
+{
   // snap vertices to a coarse screen grid (the wobbly PS1 polygons); skipped for shadow depth passes
   THREE.ShaderChunk.project_vertex = THREE.ShaderChunk.project_vertex.replace('gl_Position = projectionMatrix * mvPosition;',
     'gl_Position = projectionMatrix * mvPosition;\n#ifndef DEPTH_PACKING\n{ vec2 g = vec2(160.0, 120.0); gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g + 0.5) / g * gl_Position.w; }\n#endif');
@@ -33,19 +31,18 @@ const BOUND = 44;
 const canvas = $('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch && !PSX, powerPreference: 'high-performance' });
 renderer.setPixelRatio(PSX ? 1 : lowQ ? 0.6 : Math.min(window.devicePixelRatio, isTouch ? 1.5 : 1.75));
-renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = !lowQ;
 renderer.shadowMap.type = PSX ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 260);
+const camera = new THREE.PerspectiveCamera(65, 4 / 3, 0.05, 260);
 scene.fog = new THREE.FogExp2(0x4a3020, 0.024);
 
 // PS1 mode renders the scene at 240 lines into a target, then upscales it with 15-bit colour + ordered dithering
 const PSX_H = 240;
-const psxSize = () => [Math.round(PSX_H * innerWidth / innerHeight), PSX_H];
+const psxSize = () => [Math.round(PSX_H * 4 / 3), PSX_H];
 const psxRT = new THREE.WebGLRenderTarget(...psxSize(), { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
 const postScene = new THREE.Scene(), postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const postMat = new THREE.ShaderMaterial({
@@ -64,12 +61,25 @@ const postMat = new THREE.ShaderMaterial({
   depthTest: false, depthWrite: false,
 });
 postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  psxRT.setSize(...psxSize()); postMat.uniforms.res.value.set(...psxSize());
-  particlesN.mat.uniforms.scale.value = particlesA.mat.uniforms.scale.value = PSX ? PSX_H / 2 : innerHeight / 2;
-});
+// 4:3 screen inside a CRT bezel: side bars on wide displays, top/bottom bars on tall phones
+let viewW = 640, viewH = 480;
+function fit() {
+  const vw = innerWidth, vh = innerHeight, portrait = vh > vw;
+  const bez = Math.round(clamp(Math.min(vw, vh) * (isTouch ? 0.025 : 0.035), 8, 30));
+  const margin = isTouch ? 6 : 14;
+  const w = Math.floor(Math.min(vw - 2 * (margin + bez), (vh - 2 * (margin + bez)) * 4 / 3)), h = Math.floor(w * 3 / 4);
+  viewW = w; viewH = h;
+  const scr = $('screen'), tv = $('tv'), root = document.documentElement.style;
+  scr.style.width = w + 'px'; scr.style.height = h + 'px';
+  root.setProperty('--bez', bez + 'px'); root.setProperty('--k', clamp(w / 1000, 0.55, 1.3).toFixed(3));
+  document.body.classList.toggle('portrait', portrait);
+  document.body.classList.toggle('landscape', !portrait);
+  tv.style.marginTop = portrait ? Math.round((vh - h - 2 * bez) * 0.3) + 'px' : '';
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+fit();
+addEventListener('resize', fit);
 
 // sky dome
 const skyUni = { top: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, bot: { value: new THREE.Color() } };
@@ -600,7 +610,7 @@ class Particles {
     g.setAttribute('palpha', new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
     this.geo = g;
     this.mat = new THREE.ShaderMaterial({
-      uniforms: { scale: { value: PSX ? PSX_H / 2 : innerHeight / 2 } }, defines: PSX ? { LINEARIZE: '' } : {}, transparent: true, depthWrite: false, blending,
+      uniforms: { scale: { value: PSX_H / 2 } }, defines: PSX ? { LINEARIZE: '' } : {}, transparent: true, depthWrite: false, blending,
       vertexShader: `attribute vec3 pcolor; attribute float psize; attribute float palpha; uniform float scale; varying vec3 vC; varying float vA;
         void main(){ vC = pcolor; vA = palpha; vec4 mv = modelViewMatrix * vec4(position, 1.); gl_PointSize = psize * scale / max(.1, -mv.z); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `varying vec3 vC; varying float vA; void main(){ vec2 c = gl_PointCoord - .5; float d = length(c); if (d > .5) discard; vec3 col = vC;\n#ifdef LINEARIZE\ncol = pow(col, vec3(2.2));\n#endif\ngl_FragColor = vec4(col, vA * step(d, .42)); }`,
@@ -836,6 +846,14 @@ function musicTick() {
 // Humanoid models (boxy, procedurally animated)
 // =====================================================================
 const geoCache = new Map();
+function cylGeo(rt, rb, h, seg) { const k = `c${rt}|${rb}|${h}|${seg}`; if (!geoCache.has(k)) geoCache.set(k, new THREE.CylinderGeometry(rt, rb, h, seg)); return geoCache.get(k); }
+// tapered limb segment (6-sided) or tapered block (4-sided, stretched to w x d)
+function limb(parent, rt, rb, h, m, x, y, z) { const me = new THREE.Mesh(cylGeo(+rt.toFixed(3), +rb.toFixed(3), h, 6), m); me.position.set(x, y, z); me.castShadow = true; parent.add(me); return me; }
+function block(parent, wt, wb, h, d, m, x, y, z) {
+  const me = new THREE.Mesh(cylGeo(+(wt * Math.SQRT1_2).toFixed(3), +(wb * Math.SQRT1_2).toFixed(3), h, 4), m);
+  me.rotation.y = Math.PI / 4; me.scale.set(1, 1, 1); me.position.set(x, y, z); me.castShadow = true;
+  const g = new THREE.Group(); g.scale.z = d / Math.max(wt, wb); g.position.set(0, 0, 0); g.add(me); parent.add(g); return me;
+}
 function boxGeo(w, h, d) { const k = `${w}|${h}|${d}`; if (!geoCache.has(k)) geoCache.set(k, new THREE.BoxGeometry(w, h, d)); return geoCache.get(k); }
 function part(parent, w, h, d, m, x, y, z) { const me = new THREE.Mesh(boxGeo(w, h, d), m); me.position.set(x, y, z); me.castShadow = true; parent.add(me); return me; }
 function grp(parent, x, y, z) { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); return g; }
@@ -847,7 +865,9 @@ function makeHumanoid(c) {
   const hips = grp(root, 0, 0.95, 0);
   part(hips, 0.36 * bw, 0.2, 0.22, c.pants, 0, 0, 0);
   const torso = grp(hips, 0, 0.08, 0);
-  part(torso, 0.44 * bw, 0.58, 0.26 * Math.sqrt(bw), c.shirt, 0, 0.3, 0);
+  // chest + tapered waist
+  part(torso, 0.44 * bw, 0.3, 0.26 * Math.sqrt(bw), c.shirt, 0, 0.44, 0);
+  block(torso, 0.42 * bw, 0.36 * bw, 0.3, 0.24 * Math.sqrt(bw), c.shirt, 0, 0.15, 0);
   if (c.vest) part(torso, 0.46 * bw, 0.4, 0.28, c.vest, 0, 0.32, 0);
   if (c.apron) part(torso, 0.4 * bw, 0.75, 0.04, c.apron, 0, 0.12, 0.15);
   // finer details: collar, belt, neck
@@ -873,9 +893,10 @@ function makeHumanoid(c) {
   }
   const arm = side => {
     const sh = grp(torso, side * (0.27 * bw), 0.54, 0);
-    part(sh, 0.13 * bw, 0.32, 0.13 * bw, c.sleeve || c.shirt, 0, -0.15, 0);
+    limb(sh, 0.07 * bw, 0.056 * bw, 0.32, c.sleeve || c.shirt, 0, -0.15, 0);
+    { const dl = new THREE.Mesh(new THREE.SphereGeometry(0.078 * bw, 6, 4), c.sleeve || c.shirt); dl.position.y = -0.02; dl.castShadow = true; sh.add(dl); }
     const el = grp(sh, 0, -0.31, 0);
-    part(el, 0.11 * bw, 0.28, 0.11 * bw, c.forearm || c.sleeve || c.shirt, 0, -0.13, 0);
+    limb(el, 0.058 * bw, 0.046 * bw, 0.28, c.forearm || c.sleeve || c.shirt, 0, -0.13, 0);
     const hand = grp(el, 0, -0.3, 0);
     part(hand, 0.09, 0.1, 0.1, c.glove || c.skin, 0, 0, 0);
     part(hand, 0.03, 0.06, 0.035, c.glove || c.skin, side * -0.05, -0.02, 0.04);
@@ -883,9 +904,10 @@ function makeHumanoid(c) {
   };
   const leg = side => {
     const hip = grp(hips, side * 0.1 * bw, -0.06, 0);
-    part(hip, 0.16 * bw, 0.46, 0.17, c.pants, 0, -0.22, 0);
+    limb(hip, 0.092 * bw, 0.07 * bw, 0.46, c.pants, 0, -0.22, 0);
     const knee = grp(hip, 0, -0.45, 0);
-    part(knee, 0.14 * bw, 0.44, 0.15, c.boots || c.pants, 0, -0.21, 0);
+    limb(knee, 0.072 * bw, 0.058 * bw, 0.44, c.boots || c.pants, 0, -0.21, 0);
+    part(knee, 0.1, 0.07, 0.07, c.boots || mat(0x1a1410), 0, -0.42, -0.08);
     part(knee, 0.15, 0.08, 0.27, c.boots || mat(0x1a1410), 0, -0.44, 0.05);
     part(knee, 0.13, 0.06, 0.08, c.boots || mat(0x1a1410), 0, -0.43, 0.2);
     const foot = grp(knee, 0, -0.46, 0);
@@ -2413,14 +2435,14 @@ function drawECG(dt) {
   const bar = $('lifeBar').firstElementChild; bar.style.width = `${r * 100}%`; bar.style.background = col;
   const bpm = r > 0.6 ? 70 : r > 0.3 ? 100 : 135;
   ui.ecgT += dt * bpm / 60;
-  const CW = 340, H = 80; const seg = ui.ecg; const beat = ui.ecgT % 1;
+  const CW = ecgCtx.canvas.width, H = ecgCtx.canvas.height; const seg = ui.ecg; const beat = ui.ecgT % 1;
   let y = 0;
   if (beat > 0.1 && beat < 0.14) y = -0.15; else if (beat > 0.16 && beat < 0.19) y = 0.85; else if (beat > 0.19 && beat < 0.23) y = -0.45; else if (beat > 0.35 && beat < 0.45) y = 0.12;
   if (player.dead) y = 0;
   seg.push(y * (r > 0.3 ? 1 : 0.8) + (Math.random() - 0.5) * 0.03); while (seg.length > 120) seg.shift();
   ecgCtx.clearRect(0, 0, CW, H); ecgCtx.strokeStyle = 'rgba(255,255,255,.07)'; ecgCtx.lineWidth = 1;
-  for (let x = 0; x < CW; x += 20) { ecgCtx.beginPath(); ecgCtx.moveTo(x, 0); ecgCtx.lineTo(x, H); ecgCtx.stroke(); }
-  ecgCtx.strokeStyle = col; ecgCtx.lineWidth = 3; ecgCtx.shadowColor = col; ecgCtx.shadowBlur = 8; ecgCtx.beginPath();
+  for (let x = 0; x < CW; x += 10) { ecgCtx.beginPath(); ecgCtx.moveTo(x, 0); ecgCtx.lineTo(x, H); ecgCtx.stroke(); }
+  ecgCtx.strokeStyle = col; ecgCtx.lineWidth = 2; ecgCtx.shadowColor = col; ecgCtx.shadowBlur = 0; ecgCtx.beginPath();
   seg.forEach((v, i) => { const x = i / 119 * CW, yy = H / 2 - v * H * 0.45; i ? ecgCtx.lineTo(x, yy) : ecgCtx.moveTo(x, yy); }); ecgCtx.stroke(); ecgCtx.shadowBlur = 0;
 }
 const htmlCache = {};
@@ -2472,7 +2494,7 @@ function caseItems() {
   return it;
 }
 function renderCase() {
-  const cols = 12, rows = 8; const grid = $('caseGrid'); const cell = Math.min(52, Math.floor((Math.min(innerWidth, 980) - 64) / cols));
+  const cols = 12, rows = 8; const grid = $('caseGrid'); const cell = Math.min(52, Math.floor((Math.min($('case').clientWidth, 980) - 80) / cols));
   grid.style.width = `${cols * cell + 12}px`; grid.style.height = `${rows * cell + 12}px`; grid.style.backgroundSize = `${cell}px ${cell}px`;
   grid.innerHTML = '';
   const occ = Array.from({ length: rows }, () => new Array(cols).fill(false));
@@ -2595,8 +2617,6 @@ function winGame() {
   $('winStats').innerHTML = `<div id="rank">${rank}</div>クリアタイム ${mins}分${String(secs).padStart(2, '0')}秒<br>撃破数 ${stats.kills}　命中率 ${acc}%　ヘッドショット ${stats.heads}<br>コンティニュー ${stats.deaths}回<br><span style="color:var(--dim);font-size:14px">${STAGE.ending}</span>`;
   $('win').classList.remove('hidden'); $('hud').classList.add('hidden'); $('touch').classList.add('hidden');
 }
-$('gfxBtn').textContent = PSX ? 'グラフィック：PS1風（クリックで高画質に）' : 'グラフィック：高画質（クリックでPS1風に）';
-$('gfxBtn').onclick = () => { try { localStorage.setItem('ch-gfx', PSX ? 'hd' : 'psx'); } catch (e) { /* storage blocked */ } location.reload(); };
 document.querySelectorAll('.stage').forEach(b => b.onclick = () => startGame(b.dataset.stage));
 $('contBtn').onclick = continueGame;
 $('againBtn').onclick = () => { $('win').classList.add('hidden'); startGame(STAGE.entry || STAGE.id); };
