@@ -52,3 +52,5 @@ Vercel では Framework Preset を「Other」にして、そのままデプロ�
 - モデル・テクスチャ・効果音・BGMはすべてコードで生成しています（外部アセットなし）
 
 `three.module.min.js` は three.js r160（MIT License）を同梱したものです。
+
+開発の引き継ぎ資料・仕様は [`docs/要件定義書.md`](docs/要件定義書.md) を参照してください。
