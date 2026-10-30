@@ -88,6 +88,13 @@ canvas#game{position:fixed;inset:0;width:100%;height:100%;display:block}
 .btn:hover{background:rgba(180,20,20,.6);color:#fff}
 .btn.small{font-size:14px;padding:8px 18px;letter-spacing:.1em;margin:0}
 .btn:disabled{opacity:.35;cursor:default;background:none}
+#stageSel{display:flex;gap:14px;margin-top:24px;flex-wrap:wrap;justify-content:center}
+.stage{pointer-events:auto;cursor:pointer;width:min(280px,86vw);text-align:left;padding:12px 16px;background:rgba(40,8,6,.55);border:1px solid var(--line);color:var(--ink);font-family:inherit;transition:.15s}
+.stage:hover{border-color:var(--gold);background:rgba(120,14,10,.55)}
+.stage b{display:block;font-family:"Cinzel",serif;font-size:12px;letter-spacing:.3em;color:var(--gold)}
+.stage em{font-style:normal;color:#ff7a5a;margin-left:6px}
+.stage span{display:block;font-size:22px;font-weight:900;letter-spacing:.15em;margin:2px 0 4px}
+.stage small{display:block;font-size:12px;line-height:1.7;color:#bfb29c}
 #controls{margin-top:22px;font-size:13px;color:var(--dim);line-height:1.9;display:grid;grid-template-columns:auto auto;gap:0 22px;text-align:left}
 #controls b{color:var(--gold);font-weight:500}
 #pause,#dead,#win{background:rgba(0,0,0,.72)}
@@ -201,7 +208,10 @@ body.touch #hint{display:none}
     霧に閉ざされた山あいの村へ足を踏み入れた。<br>
     出迎えた村人たちの瞳は、赤く濁っていた――。
   </div>
-  <button class="btn" id="startBtn">ゲームを始める</button>
+  <div id="stageSel">
+    <button class="stage" data-stage="village"><b>STAGE 1</b><span>赤霧の村</span><small>霧に閉ざされた山あいの村。寄生された村人と、教会に潜む処刑人。</small></button>
+    <button class="stage" data-stage="city"><b>STAGE 2 <em>TEST</em></b><span>燃える街</span><small>ウイルスが漏れ出した地方都市。夜の大通りにゾンビがあふれ、警察署から変異体が現れる。</small></button>
+  </div>
   <div id="controls">
     <span><b>WASD</b> 移動 / <b>Shift</b> 走る</span><span><b>マウス</b> 視点</span>
     <span><b>右クリック</b> 構える（構え中は移動不可）</span><span><b>左クリック</b> 撃つ / 構えなしでナイフ</span>
