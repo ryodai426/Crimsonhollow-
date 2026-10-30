@@ -2880,7 +2880,7 @@ function updatePlayer(dt) {
   // aiming slows you down to a careful walk
   const canMove = (p.state === 'normal' || p.state === 'guard') && !p.grabbedBy && p.hurtT <= 0;
   const run = (keys.ShiftLeft || keys.ShiftRight || input.run) && my > 0.3 && p.reloadT <= 0 && !p.aiming && p.state !== 'guard';
-  let spd = p.state === 'guard' ? 1.1 : p.aiming ? 1.3 : run ? 4.8 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
+  let spd = p.state === 'guard' ? 1.1 : p.aiming ? 1.3 : run ? 4.4 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
   const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw), rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
   let tvx = 0, tvz = 0;
   if (canMove && ml > 0.05) { tvx = (fx * my + rx * mx) * spd; tvz = (fz * my + rz * mx) * spd; }
