@@ -2880,7 +2880,7 @@ function updatePlayer(dt) {
   // aiming slows you down to a careful walk
   const canMove = (p.state === 'normal' || p.state === 'guard') && !p.grabbedBy && p.hurtT <= 0;
   const run = (keys.ShiftLeft || keys.ShiftRight || input.run) && my > 0.3 && p.reloadT <= 0 && !p.aiming && p.state !== 'guard';
-  let spd = p.state === 'guard' ? 1.1 : p.aiming ? 1.3 : run ? 5.4 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
+  let spd = p.state === 'guard' ? 1.1 : p.aiming ? 1.3 : run ? 4.8 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
   const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw), rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
   let tvx = 0, tvz = 0;
   if (canMove && ml > 0.05) { tvx = (fx * my + rx * mx) * spd; tvz = (fz * my + rz * mx) * spd; }
@@ -2897,7 +2897,7 @@ function updatePlayer(dt) {
   if (p.state === 'stumble' && p.stateT > 0.5) p.state = 'normal';
   const sp = Math.hypot(p.vel.x, p.vel.z);
   p.stepAcc += sp * dt; if (p.stepAcc > (run ? 1.5 : 1.15)) { p.stepAcc = 0; sfx.step(run); }
-  p.phase += sp * dt * (run ? 2.6 : 3.2);
+  p.phase += sp * dt * (run ? 2.5 : 3.2);
   // actions
   p.guardCD -= dt;
   if (p.state === 'guard' && p.stateT > GUARD_T) { p.state = 'normal'; p.guardCD = GUARD_CD; }
