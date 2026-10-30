@@ -2572,8 +2572,8 @@ function updatePlayer(dt) {
   // move
   let mx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + input.mx, my = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + input.my;
   const ml = Math.hypot(mx, my); if (ml > 1) { mx /= ml; my /= ml; }
-  // on touch you can walk slowly while aiming; on desktop aiming roots you in place
-  const canMove = (!p.aiming || isTouch) && (p.state === 'normal') && !p.grabbedBy && p.hurtT <= 0;
+  // aiming slows you down to a careful walk
+  const canMove = (p.state === 'normal') && !p.grabbedBy && p.hurtT <= 0;
   const run = (keys.ShiftLeft || keys.ShiftRight || input.run) && my > 0.3 && p.reloadT <= 0 && !p.aiming;
   let spd = p.aiming ? 1.3 : run ? 5.4 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
   const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw), rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
