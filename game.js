@@ -72,9 +72,12 @@ function fit() {
   document.body.classList.toggle('portrait', portrait);
   document.body.classList.toggle('landscape', !portrait);
   if (isTouch) {
+    if ($('topRight').parentNode !== $('topLeft')) $('topLeft').appendChild($('topRight')); // gold/items flow under the objective
     // phones: fixed 9:16 (portrait) / 16:9 (landscape) screen, letterboxed; the short side gets 240 PS1 lines
     const ar = portrait ? 9 / 16 : 16 / 9;
-    const w = Math.floor(Math.min(vw, vh * ar)), h = Math.floor(w / ar);
+    const bz = Math.round(clamp(Math.min(vw, vh) * 0.03, 8, 16)), m = 4, pad = 2 * (bz + m);
+    root.setProperty('--bez', bz + 'px');
+    const w = Math.floor(Math.min(vw - pad, (vh - pad) * ar)), h = Math.floor(w / ar);
     viewW = w; viewH = h;
     const sc = PSX_H / Math.min(w, h); psxW = Math.round(w * sc); psxH = Math.round(h * sc);
     $('screen').style.width = w + 'px'; $('screen').style.height = h + 'px'; $('tv').style.marginTop = '';

@@ -23,7 +23,7 @@ body.portrait:not(.touch){align-items:flex-start}
 .px,#hud,.screen,.panelWrap,.btn,.tbtn{-webkit-text-stroke:.45px currentColor;paint-order:stroke fill}
 
 /* ---------- CRT television frame ---------- */
-#tv{position:relative;flex:none;border-radius:22px;padding:var(--bez,24px);
+#tv{position:relative;flex:none;border-radius:calc(var(--bez,24px)*.9);padding:var(--bez,24px);
   background:radial-gradient(120% 140% at 30% 10%,#3a3734 0%,#222120 45%,#151413 100%);
   box-shadow:0 0 0 1px #000,inset 0 2px 0 rgba(255,255,255,.08),inset 0 -3px 6px rgba(0,0,0,.6),0 20px 60px rgba(0,0,0,.8)}
 #tv:after{content:"";position:absolute;right:calc(var(--bez,24px)*1.1);bottom:calc(var(--bez,24px)*.32);width:6px;height:6px;border-radius:50%;
@@ -166,19 +166,18 @@ body.touch #controls{display:none}
 .tbtn.on{background:rgba(180,20,20,.7)}
 #lookZone{position:absolute;right:0;top:0;width:60%;height:100%;pointer-events:auto}
 body.touch #hint{display:none}
-body.touch #tv{padding:0;border-radius:0;background:none;box-shadow:none}
-body.touch #tv:after,body.touch #glass{display:none}
-body.touch #screen{border-radius:0;box-shadow:none}
 body.touch #topLeft{left:calc(12px + env(safe-area-inset-left,0px));top:calc(10px + env(safe-area-inset-top,0px));max-width:58%}
 body.touch #status{top:calc(8px + env(safe-area-inset-top,0px));right:calc(10px + env(safe-area-inset-right,0px));bottom:auto;flex-direction:column-reverse;align-items:flex-end;gap:4px}
-body.touch #topRight{right:auto;left:calc(12px + env(safe-area-inset-left,0px));top:auto;bottom:auto;text-align:left;position:absolute;margin-top:calc(var(--k)*76px);top:calc(10px + env(safe-area-inset-top,0px))}
+body.touch #topRight{position:static;text-align:left;margin-top:calc(var(--k)*6px)}
 body.touch #log{bottom:auto;top:40%;left:12px}
 body.touch #prompt{top:46%}
 body.touch #bossBar{top:auto;bottom:44%;width:70%}
 body.touch.portrait #tCase{top:auto!important;left:28px!important;bottom:calc(176px + env(safe-area-inset-bottom,0px))}
 body.touch.landscape #status{flex-direction:row;align-items:flex-start;gap:10px}
+body.touch.portrait #stick{left:18px;width:118px;height:118px}
+body.touch.portrait #tCase{left:22px!important}
+body.touch.landscape #topLeft{max-width:36%}
 body.touch.landscape #topLeft{left:calc(84px + env(safe-area-inset-left,0px))}
-body.touch.landscape #topRight{left:calc(84px + env(safe-area-inset-left,0px))}
 #tCase{font-size:13px}
 /* landscape phones: pack the action buttons into a 3x3 grid that fits the right-hand black bar */
 body.touch.landscape .tbtn{width:56px!important;height:56px!important;font-size:14px}
