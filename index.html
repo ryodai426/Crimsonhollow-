@@ -179,6 +179,11 @@ body.touch.portrait #tCase{left:22px!important}
 body.touch.landscape #topLeft{max-width:36%}
 body.touch.landscape #topLeft{left:calc(84px + env(safe-area-inset-left,0px))}
 #tCase{font-size:13px}
+#tTrade{left:50%;top:54%;transform:translateX(-50%);width:auto;height:auto;padding:12px 22px;border-radius:4px;border-color:var(--gold);color:var(--gold);background:rgba(20,14,6,.75);font-size:17px;white-space:nowrap}
+body.touch.landscape #tNext,body.touch.landscape #tTrade{width:auto!important;height:auto!important}
+body.touch.portrait #tTrade{top:48%}
+/* keep 次の章へ clear of the objective text in the top-left */
+body.touch #tNext{top:30%!important}
 /* landscape phones: pack the action buttons into a 3x3 grid that fits the right-hand black bar */
 body.touch.landscape .tbtn{width:56px!important;height:56px!important;font-size:14px}
 body.touch.landscape #tAct{right:14px!important;bottom:20px!important}
@@ -309,6 +314,7 @@ body.touch.landscape #tNext{width:auto!important;height:auto!important}
   <button class="tbtn" id="tGren" style="right:146px;bottom:240px;width:52px;height:52px">手榴</button>
   <button class="tbtn" id="tTurn" style="right:178px;bottom:110px;width:52px;height:52px">180°</button>
   <button class="tbtn" id="tCase" style="left:22px;top:22px;width:52px;height:52px">ケース</button>
+  <button class="tbtn hidden" id="tTrade">商人と取引</button>
   <button class="tbtn hidden" id="tNext" style="left:50%;top:22px;width:auto;height:auto;padding:10px 18px;border-radius:4px;transform:translateX(-50%)">次の章へ</button>
 </div>
 <div id="glass"></div>

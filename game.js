@@ -2306,7 +2306,7 @@ function updateDirector(dt) {
         director.phase = 'rest'; const bonus = 800 + director.wave * 600; inv.gold += bonus;
         showBanner('CHAPTER CLEAR', `報酬 ${bonus.toLocaleString()} G`); sfx.cash();
         trader.show(); setMusic('rest');
-        setH('obj', `商人と取引する <span class="kbd">E</span>／準備ができたら <span class="kbd">ENTER</span> で次の章へ`);
+        setH('obj', isTouch ? '商人と取引する／準備ができたら「次の章へ」' : `商人と取引する <span class="kbd">E</span>／準備ができたら <span class="kbd">ENTER</span> で次の章へ`);
         if (isTouch) $('tNext').classList.remove('hidden');
       }
     }
@@ -2590,7 +2590,8 @@ if (isTouch) {
   const btn = (id, down, up) => { const b = $(id); b.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); down(b); }, { passive: false }); if (up) b.addEventListener('touchend', e => { e.preventDefault(); up(b); }); };
   btn('tAim', b => { input.aim = !input.aim; b.classList.toggle('on', input.aim); });
   btn('tFire', () => { input.fire = true; if (!input.aim) doKnife(); }, () => { input.fire = false; });
-  btn('tAct', () => { if (player.grabbedBy || qte.dodgeOpen) spacePressed(); else if (trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2) interact(); else doGuard(); });
+  btn('tAct', () => { if (player.grabbedBy || qte.dodgeOpen) spacePressed(); else doGuard(); });
+  btn('tTrade', () => interact());
   btn('tReload', () => startReload()); btn('tKnife', () => doKnife()); btn('tHeal', () => heal());
   btn('tWeap', () => cycleWeapon(1)); btn('tGren', () => throwGrenade()); btn('tTurn', () => quickTurn());
   btn('tCase', () => openCase()); btn('tNext', () => nextWave());
@@ -2599,7 +2600,7 @@ if (isTouch) {
 // =====================================================================
 // UI helpers
 // =====================================================================
-const ui = { dmg: 0, bannerT: 0, prompt: '', logN: 0, ecg: [], ecgT: 0 };
+const ui = { dmg: 0, bannerT: 0, prompt: '', logN: 0, ecg: [], ecgT: 0, trade: false };
 function showBanner(a, b) { $('bannerA').textContent = a; $('bannerB').textContent = b; $('banner').style.opacity = 1; ui.bannerT = 3.2; }
 function showLog(text) {
   const d = document.createElement('div'); d.textContent = text; $('log').appendChild(d);
@@ -2650,9 +2651,11 @@ function updateHUD(dt) {
   subT -= dt;
   // prompt
   let pr = '';
+  const nearTrader = !player.dead && !player.grabbedBy && trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2;
+  if (isTouch && nearTrader !== ui.trade) { ui.trade = nearTrader; $('tTrade').classList.toggle('hidden', !nearTrader); }
   if (!player.dead && !player.grabbedBy) {
     if (player.state === 'normal' && player.guardCD <= 0 && enemies.some(e => e.alive && (e.state === 'windup' || e.state === 'grabWind' || e.state === 'swingWind') && e.pos.distanceTo(player.pos) < (e.boss ? 5 : 3))) pr = `<kbd>${isTouch ? 'ガード' : 'F'}</kbd>ガード！`;
-    else if (trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2) pr = `<kbd>${isTouch ? 'E' : 'E'}</kbd>商人と取引`;
+    else if (nearTrader) pr = isTouch ? '' : `<kbd>E</kbd>商人と取引`;
     else if (inv.mag[id] === 0 && inv.ammo[id] > 0 && player.reloadT <= 0) pr = `<kbd>R</kbd>リロード`;
   }
   if (pr !== ui.prompt) { ui.prompt = pr; $('prompt').innerHTML = pr; $('prompt').classList.toggle('hidden', !pr); }
@@ -2761,6 +2764,7 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => { shopTab = t.d
 function openShop() { game.state = 'shop'; document.exitPointerLock?.(); merchantSay('hello'); renderShop(); $('shop').classList.remove('hidden'); }
 function closeShop() { merchantSay('bye'); $('shop').classList.add('hidden'); resumeGame(); }
 $('shopClose').onclick = closeShop;
+if (isTouch) $('shopClose').textContent = '店を出る';
 
 function pauseGame() { if (game.state !== 'play') return; game.state = 'pause'; $('pause').classList.remove('hidden'); input.aim = input.fire = false; for (const k in keys) keys[k] = false; }
 function resumeGame() {
