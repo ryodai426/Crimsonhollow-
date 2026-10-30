@@ -931,7 +931,12 @@ const sfx = {
     g.connect(o); src.start(t); vib.start(t); src.stop(t + dur + 0.2); vib.stop(t + dur + 0.2);
   },
   hurt() { if (!this.ok()) return; const t = AC.ctx.currentTime, o = out(0.5, 0, 0.1); tone(t, 'sawtooth', 160, 90, 0.22, o, 0.35, 0.01); const g = AC.ctx.createGain(); env(g, t, 0.003, 0.6, 0.12); g.connect(o); noise(t, 0.12, g, 500, 120); },
-  kick() { if (!this.ok()) return; const t = AC.ctx.currentTime, o = out(0.7, 0, 0.2); const g = AC.ctx.createGain(); env(g, t, 0.02, 0.4, 0.18); g.connect(o); noise(t, 0.2, g, 600, 2400, 'bandpass', 1.5); tone(t + 0.22, 'sine', 140, 45, 0.18, o, 0.9); const g2 = AC.ctx.createGain(); env(g2, t + 0.22, 0.002, 0.8, 0.1); g2.connect(o); noise(t + 0.22, 0.1, g2, 1800, 300); },
+  guard(just) {
+    if (!this.ok()) return; const t = AC.ctx.currentTime, o = out(0.7, 0, 0.3);
+    const g = AC.ctx.createGain(); env(g, t, 0.002, 0.8, 0.12); g.connect(o); noise(t, 0.12, g, just ? 3200 : 1600, 500, 'bandpass', 2);
+    tone(t, 'square', just ? 520 : 260, just ? 380 : 140, 0.12, o, 0.35);
+    if (just) tone(t + 0.02, 'triangle', 1560, 1480, 0.25, o, 0.25);
+  },
   swish() { if (!this.ok()) return; const t = AC.ctx.currentTime, g = AC.ctx.createGain(); env(g, t, 0.03, 0.35, 0.12); g.connect(out(0.6, 0.2, 0.1)); noise(t, 0.16, g, 1200, 5000, 'bandpass', 2); },
   boom(pos) {
     if (!this.ok()) return; const s = spatial(pos), t = AC.ctx.currentTime, o = out(Math.min(1.2, s.vol * 2.2), s.pan, 0.6);
@@ -1653,7 +1658,7 @@ const W = id => { const w = WEAP[id], l = inv.lv[id]; return { ...w, d: w.dmg[l.
 const player = {
   pos: START_POS.clone(), vel: new V3(), yaw: 0, pitch: -0.08, modelYaw: 0, hp: 100, maxHp: 100,
   state: 'normal', stateT: 0, aim: 0, aiming: false, fireT: 0, reloadT: 0, reloadMax: 1, weapon: 'hg',
-  invuln: 0, hurtT: 0, grabbedBy: null, mash: 0, grabT: 0, dodgeT: 0, dodgeDir: new V3(), kickHit: false, knifeHit: false,
+  invuln: 0, hurtT: 0, grabbedBy: null, mash: 0, grabT: 0, dodgeT: 0, dodgeDir: new V3(), guardCD: 0, knifeHit: false,
   stepAcc: 0, phase: 0, turnT: 0, turnFrom: 0, dead: false, hpLowT: 0, sway: 0, recoil: 0,
 };
 const ph = makeHumanoid({
@@ -1777,7 +1782,7 @@ class Enemy {
     this.h = makeVillager(type); this.h.root.position.copy(this.pos); this.h.root.rotation.y = this.face; scene.add(this.h.root);
     this.hb = { head: new V3(), neck: new V3(), hips: new V3(), feet: new V3(), core: new V3() };
     this.scale = this.h.scale; this.radius = 0.33 * this.scale;
-    this.kickable = false; this.throwCD = rand(2, 5); this.parasiteChance = waveCfg?.parasite || 0;
+    this.throwCD = rand(2, 5); this.parasiteChance = waveCfg?.parasite || 0;
     this.isParasite = false; this.stagger = 0; this.slamPos = new V3(); this.phase2 = false; this.alerted = false;
     this.chargeDir = new V3(); this.hitThisCharge = false;
     this.updateHB();
@@ -1819,7 +1824,7 @@ class Enemy {
     if (this.hp <= 0) { this.die(false, new V3(0, 0, 1), src); return; }
     if (this.stagger > 280 && this.state !== 'kneel') { this.stagger = 0; this.setState('kneel'); sfx.roar(this.pos); hideSlam(); }
   }
-  knockdown() { if (!this.alive) return; this.setState('down'); this.kickable = false; this.vel.set(0, 0, 0); if (player.grabbedBy === this) releaseGrab(); }
+  knockdown() { if (!this.alive) return; this.setState('down'); this.vel.set(0, 0, 0); if (player.grabbedBy === this) releaseGrab(); }
   die(head, dir, src) {
     if (player.grabbedBy === this) releaseGrab();
     if (head && this.parasiteChance > 0 && !this.isParasite && Math.random() < this.parasiteChance) {
@@ -1829,7 +1834,7 @@ class Enemy {
       showLog('寄生体が姿を現した！ ショットガンが有効だ'); return;
     }
     if (head) { this.h.head.visible = false; fxBlood(this.hb.head, dir, 50, 1.6); sfx.splat(this.pos); }
-    this.setState('dying'); this.kickable = false;
+    this.setState('dying');
     this.fallDir = 1;
     stats.kills++; if (head) stats.headKills++;
     addDecal(this.pos.x, this.pos.z, this.boss ? 2.4 : 1);
@@ -1849,13 +1854,13 @@ class Enemy {
     if (this.losT <= 0) { this.losT = rand(0.2, 0.35); this.los = segClear(_a.set(this.pos.x, 0.6, this.pos.z), _b.set(P.x, 0.6, P.z)); }
     if (this.voiceT <= 0) { this.voiceT = rand(2.5, 6); if (dist < 25) { if (this.t.zombie) sfx.groan(this.pos, this.scale); else { sfx.voice(this.pos, this.scale); if (dist < 16 && Math.random() < 0.25) showSubtitle(pick(CHANTS)); } } }
     let moveSpeed = 0;
-    this.kickable = false;
+   
     switch (this.state) {
       case 'chase': {
         if (player.dead) { moveSpeed = 0.4; break; }
         moveSpeed = this.isParasite ? this.speed : this.speed;
         if (dist < this.t.range + 0.1 && this.cd <= 0) {
-          if (this.t.grab && !player.grabbedBy && dist < 1.7 && Math.random() < this.t.grab && player.state !== 'kick') this.setState('grabWind');
+          if (this.t.grab && !player.grabbedBy && dist < 1.7 && Math.random() < this.t.grab) this.setState('grabWind');
           else this.setState('windup');
         } else if (this.t.thrower && dist > 6 && dist < 18 && this.los && this.throwCD <= 0) this.setState('throwWind');
         break;
@@ -1866,14 +1871,17 @@ class Enemy {
           this.struck = true; sfx.swish();
           const range = (this.isParasite ? 2.7 : this.t.range) + 0.45;
           const facing = Math.cos(angDiff(this.face, toFace));
-          if (dist < range && facing > 0.4) hurtPlayer(this.isParasite ? 24 : this.t.dmg * (1 + director.wave * 0.05), this.pos);
+          if (dist < range && facing > 0.4) hurtPlayer(this.isParasite ? 24 : this.t.dmg * (1 + director.wave * 0.05), this.pos, false, this);
         }
         if (this.st > 0.25) { this.struck = false; this.setState('recover'); }
         break;
       case 'recover': if (this.st > this.t.recover) { this.setState('chase'); this.cd = rand(0.7, 1.5); } break;
       case 'grabWind':
         this.face = dampAng(this.face, toFace, 8, dt); moveSpeed = this.speed * 1.4;
-        if (this.st > 0.45) { if (dist < 1.5 && !player.grabbedBy && player.invuln <= 0 && player.state !== 'kick' && !player.dead && player.dodgeT <= 0) startGrab(this); else { this.setState('recover'); } }
+        if (this.st > 0.45) {
+          if (dist < 1.5 && guardFacing(this.pos)) { const just = player.stateT <= GUARD_JUST; sfx.guard(just); showLog(just ? 'ジャストガード！ 掴みを防いだ' : '掴みを防いだ'); guardRecoil(this, true); }
+          else if (dist < 1.5 && !player.grabbedBy && player.invuln <= 0 && !player.dead && player.dodgeT <= 0) startGrab(this); else { this.setState('recover'); }
+        }
         break;
       case 'grabbing': {
         const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
@@ -1882,12 +1890,12 @@ class Enemy {
         break;
       }
       case 'throwWind': this.face = dampAng(this.face, toFace, 8, dt); if (this.st > 0.85) { throwAxe(this); this.throwCD = rand(4, 7); this.setState('recover'); } break;
-      case 'stagger': this.kickable = true; if (this.st > this.stDur) this.setState('chase'); break;
+      case 'stagger': if (this.st > this.stDur) this.setState('chase'); break;
       case 'flinch': if (this.st > 0.3) this.setState('chase'); break;
       case 'down': if (this.st > 2.0) this.setState('getup'); break;
       case 'getup': if (this.st > 0.7) this.setState('chase'); break;
       case 'emerge': if (this.st > 1.2) this.setState('chase'); break;
-      case 'stunned': this.kickable = true; if (this.st > 1.2) this.setState('chase'); break;
+      case 'stunned': if (this.st > 1.2) this.setState('chase'); break;
     }
     // locomotion
     const desire = _c.set(0, 0, 0);
@@ -1933,7 +1941,8 @@ class Enemy {
     else if (s === 'grabbing') { p.lsx = -1.6; p.rsx = -1.6; p.lex = -0.5; p.rex = -0.5; p.tx = 0.35; p.hx = 0.3; walkPose(p, this.st * 10, 0.15); }
     else if (s === 'flinch') { p.tx = -0.35; p.hx = -0.4; p.rsx = 0.3; p.lsx = 0.3; }
     else if (s === 'stagger') {
-      if (this.staggerKind === 'head') { p.lsx = -2.4; p.rsx = -2.0; p.lex = -1.8; p.rex = -1.6; p.tx = -0.25; p.hx = -0.3 + Math.sin(this.st * 8) * 0.15; p.ty = Math.sin(this.st * 5) * 0.2; }
+      if (this.staggerKind === 'recoil') { p.tx = -0.55; p.hx = -0.5; p.lsx = -0.6; p.rsx = -0.4; p.lsz = 0.7; p.rsz = -0.7; p.lex = -0.3; p.rex = -0.3; p.lkx = 0.3; p.rkx = 0.15; p.py = -0.05; }
+      else if (this.staggerKind === 'head') { p.lsx = -2.4; p.rsx = -2.0; p.lex = -1.8; p.rex = -1.6; p.tx = -0.25; p.hx = -0.3 + Math.sin(this.st * 8) * 0.15; p.ty = Math.sin(this.st * 5) * 0.2; }
       else { p.lhx = -1.4; p.lkx = 1.6; p.rhx = 0.2; p.rkx = 1.9; p.py = -0.42; p.tx = 0.4; p.lsx = -0.6; p.rsx = -0.4; }
     } else if (s === 'down' || s === 'dying') {
       const t = clamp(this.st / 0.55, 0, 1);
@@ -1953,7 +1962,7 @@ class Enemy {
 
   updateBoss(dt) {
     const P = player.pos, dx = P.x - this.pos.x, dz = P.z - this.pos.z, dist = Math.hypot(dx, dz) || 0.001, toFace = Math.atan2(dx, dz);
-    let speed = 0; this.kickable = false;
+    let speed = 0;
     const h = this.h, p = {};
     switch (this.state) {
       case 'intro': speed = 1.2; if (this.st > 3.2) { this.setState('roar'); sfx.roar(this.pos); } break;
@@ -1971,7 +1980,7 @@ class Enemy {
       case 'swingWind': this.face = dampAng(this.face, toFace, 4, dt); p.rsx = -1.6; p.rsz = -1.3; p.ty = 0.9; p.lsx = -0.6; if (this.st > (this.phase2 ? 0.65 : 0.9)) { this.setState('swing'); sfx.swish(); } break;
       case 'swing': {
         p.rsx = -1.5; p.rsz = 0.6; p.ty = -1.0; p.tx = 0.3;
-        if (!this.struck) { this.struck = true; const fa = Math.cos(angDiff(this.face, toFace)); if (dist < 4.4 && fa > 0.2 && hurtPlayer(32, this.pos)) knockPlayer(this.pos, 7); }
+        if (!this.struck) { this.struck = true; const fa = Math.cos(angDiff(this.face, toFace)); if (dist < 4.4 && fa > 0.2 && hurtPlayer(32, this.pos, false, this) === true) knockPlayer(this.pos, 7); }
         if (this.st > 0.3) { this.struck = false; this.setState('recover'); this.recoverDur = 0.9; }
         break;
       }
@@ -1988,7 +1997,7 @@ class Enemy {
           this.struck = true; hideSlam(); shake(0.5, 0.6); sfx.boom(this.slamPos);
           const fwd = new V3(Math.sin(this.face), 0, Math.cos(this.face)).multiplyScalar(2.6 * this.scale / 1.6).add(this.pos);
           fxDust(fwd, 30); for (let i = 0; i < 12; i++) particlesN.add(fwd.x, 0.1, fwd.z, rand(-4, 4), rand(1, 4), rand(-4, 4), rand(0.6, 1.2), 0.12, 0.05, 0.3, 0.25, 0.2, 1, 12, 0.5);
-          if (Math.hypot(P.x - fwd.x, P.z - fwd.z) < 3.4 && hurtPlayer(42, fwd)) knockPlayer(fwd, 8);
+          if (Math.hypot(P.x - fwd.x, P.z - fwd.z) < 3.4 && hurtPlayer(42, fwd, false, this) === true) knockPlayer(fwd, 8);
         }
         if (this.st > 0.35) { this.struck = false; this.setState('recover'); this.recoverDur = 1.2; }
         break;
@@ -2000,16 +2009,15 @@ class Enemy {
         const blocked = pre.distanceToSquared(this.pos) > 0.0004 || Math.abs(this.pos.x) >= BOUND || Math.abs(this.pos.z) >= BOUND;
         const rel = _b.subVectors(P, this.pos); const ahead = rel.dot(this.chargeDir);
         if (!this.hitThisCharge && ahead > -0.5 && ahead < 1.6 && Math.abs(rel.x * this.chargeDir.z - rel.z * this.chargeDir.x) < 1.3) {
-          if (hurtPlayer(40, this.pos)) { knockPlayer(this.pos, 10); this.hitThisCharge = true; }
+          const r = hurtPlayer(40, this.pos, false, this); if (r) this.hitThisCharge = true; if (r === true) knockPlayer(this.pos, 10); else if (r) knockPlayer(this.pos, 4);
         }
         if (ahead > 0 && ahead < 7 && !this.hitThisCharge && player.dodgeT <= 0) qte.dodgeOpen = true;
         if (blocked) { this.setState('stun'); shake(0.6, 0.7); sfx.wood(this.pos); fxDust(this.pos, 30); showLog(`${STAGE.bossShort}が壁に激突した！今だ！`); hideQTE(); }
         else if (this.st > 2.2) { this.setState('recover'); this.recoverDur = 1.0; }
         break;
       }
-      case 'stun': p.tx = 0.6; p.hx = 0.4; p.rsx = 0.3; p.lsx = 0.3; p.py = -0.2; this.kickable = true; if (this.st > 2.6) this.setState('chase'); break;
-      case 'kneel': p.lhx = -1.4; p.lkx = 1.6; p.rhx = 0.2; p.rkx = 1.9; p.py = -0.42; p.tx = 0.6; p.lsx = -0.4; p.rsx = -0.3; p.hx = 0.3; this.kickable = true; if (this.st > 3.2) this.setState('chase'); break;
-      case 'kicked': p.rx = -0.5; p.tx = -0.4; if (this.st > 1.0) this.setState('chase'); break;
+      case 'stun': p.tx = 0.6; p.hx = 0.4; p.rsx = 0.3; p.lsx = 0.3; p.py = -0.2; if (this.st > 2.6) this.setState('chase'); break;
+      case 'kneel': p.lhx = -1.4; p.lkx = 1.6; p.rhx = 0.2; p.rkx = 1.9; p.py = -0.42; p.tx = 0.6; p.lsx = -0.4; p.rsx = -0.3; p.hx = 0.3; if (this.st > 3.2) this.setState('chase'); break;
       case 'recover': p.tx = 0.3; p.rsx = -0.4; if (this.st > (this.recoverDur || 1)) { this.setState('chase'); this.cd = rand(0.6, 1.4); } break;
     }
     if (this.state !== 'charge') qte.dodgeOpen = false;
@@ -2026,7 +2034,7 @@ class Enemy {
     if (this.state === 'chase' || this.state === 'intro') { this.face = dampAng(this.face, this.state === 'intro' ? 0 : toFace, 4, dt); walkPose(p, this.phase, clamp(sp / 1.6, 0, 1)); p.rsx = (p.rsx || 0) - 0.3; p.tx = (p.tx || 0) + 0.15; }
     this.phase += sp * dt * 2.2;
     if (this.state !== 'charge' && sp > 0.5 && Math.floor(this.phase / Math.PI) !== Math.floor((this.phase - sp * dt * 2.2) / Math.PI)) { shake(0.06, 0.15); }
-    if (!player.dead && this.state !== 'kneel' && this.state !== 'stun' && this.state !== 'kicked') lookAt(p, this.face, this.pos, _lk.set(player.pos.x, 1.55, player.pos.z), 1.7 * this.scale, 0.8);
+    if (!player.dead && this.state !== 'kneel' && this.state !== 'stun') lookAt(p, this.face, this.pos, _lk.set(player.pos.x, 1.55, player.pos.z), 1.7 * this.scale, 0.8);
     applyPose(h, p, dt, this.state === 'swing' || this.state === 'slam' ? 28 : 10);
     h.root.position.x = this.pos.x; h.root.position.z = this.pos.z; h.root.rotation.y = this.face;
     h.core.material.color.setHSL(this.t.coreHue, 1, 0.5 + Math.sin(performance.now() / 120) * 0.15);
@@ -2304,8 +2312,26 @@ function nextWave() {
 // Player actions
 // =====================================================================
 function camForward(out) { return out.set(-Math.sin(player.yaw) * Math.cos(player.pitch), Math.sin(player.pitch), -Math.cos(player.yaw) * Math.cos(player.pitch)); }
-function hurtPlayer(dmg, from, force) {
-  if (player.dead || (!force && (player.invuln > 0 || player.state === 'kick' || player.dodgeT > 0))) return false;
+// guard window: pressed once, lasts GUARD_T; the first GUARD_JUST seconds are a "just guard"
+const GUARD_T = 0.5, GUARD_JUST = 0.2, GUARD_CD = 0.35;
+function guardFacing(from) {
+  if (player.state !== 'guard' || !from) return false;
+  const dx = from.x - player.pos.x, dz = from.z - player.pos.z, d = Math.hypot(dx, dz) || 1;
+  return (dx * -Math.sin(player.yaw) + dz * -Math.cos(player.yaw)) / d > 0.2; // roughly in front
+}
+// returns false (no effect), 'guard' (blocked, reduced) or true (clean hit)
+function hurtPlayer(dmg, from, force, attacker) {
+  if (player.dead || (!force && (player.invuln > 0 || player.dodgeT > 0))) return false;
+  if (!force && guardFacing(from)) {
+    const just = player.stateT <= GUARD_JUST;
+    dmg *= just ? 0.1 : 0.35; if (inv.vest) dmg *= 0.7;
+    player.hp -= dmg; player.invuln = 0.3; sfx.guard(just); shake(just ? 0.12 : 0.2, 0.2);
+    fxSparks(player.pos.clone().setY(1.4).addScaledVector(_a.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw)), 0.45), just ? 14 : 7);
+    showLog(just ? 'ジャストガード！' : 'ガード');
+    if (attacker) guardRecoil(attacker, just);
+    if (player.hp <= 0) { player.hp = 0; killPlayer(); }
+    return 'guard';
+  }
   if (inv.vest) dmg *= 0.7;
   player.hp -= dmg; player.invuln = force ? 0.1 : 0.55; player.hurtT = 0.3; ui.dmg = 1; shake(0.25, 0.35); sfx.hurt();
   fxBlood(player.pos.clone().setY(1.3), player.pos.clone().sub(from || player.pos).setY(0).normalize(), 12);
@@ -2329,37 +2355,15 @@ function releaseGrab(escaped) {
   const e = player.grabbedBy; player.grabbedBy = null; hideQTE(); player.invuln = 0.9;
   if (e && e.alive) { if (escaped) { e.setState('stagger'); e.staggerKind = 'head'; e.stDur = 1.6; const d = _a.subVectors(e.pos, player.pos).setY(0).normalize(); e.pos.addScaledVector(d, 0.6); } else e.setState('recover'); }
 }
-function kickTarget() {
-  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw); let best = null, bd = 1e9;
-  for (const e of enemies) {
-    if (!e.alive || !e.kickable) continue;
-    const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z, d = Math.hypot(dx, dz);
-    const reach = e.boss ? 3.6 : 2.5;
-    if (d < reach && (dx * fx + dz * fz) / (d || 1) > 0.25 && d < bd) { bd = d; best = e; }
-  }
-  return best;
+function guardRecoil(e, just) {
+  if (!e || !e.alive) return;
+  if (e.boss) { e.stagger += just ? 140 : 40; if (just && e.state !== 'kneel') { e.setState('recover'); e.recoverDur = 1.4; } return; }
+  e.setState('stagger'); e.staggerKind = 'recoil'; e.stDur = just ? 1.4 : 0.7;
+  const d = _a.subVectors(e.pos, player.pos).setY(0); if (d.lengthSq() > 1e-4) d.normalize(); e.vel.addScaledVector(d, just ? 4 : 2.5);
 }
-function doKick() {
-  if (player.state !== 'normal' || player.grabbedBy || player.dead) return;
-  const tgt = kickTarget(); if (!tgt) return;
-  player.state = 'kick'; player.stateT = 0; player.kickHit = false; player.reloadT = 0;
-  sfx.kick();
-}
-function applyKick() {
-  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
-  let n = 0;
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z, d = Math.hypot(dx, dz);
-    if (d < (e.boss ? 3.8 : 2.9) && (dx * fx + dz * fz) / (d || 1) > -0.1) {
-      const dir = _a.set(dx / (d || 1), 0.3, dz / (d || 1));
-      if (e.boss) { if (e.kickable) { e.hp -= 110; e.setState('kicked'); fxBlood(e.hb.neck, dir, 20, 1.5); shake(0.35, 0.4); if (e.hp <= 0) e.die(false, dir, 'kick'); n++; } continue; }
-      e.hp -= 22; fxBlood(e.hb.neck, dir, 8);
-      if (e.hp <= 0) e.die(false, dir, 'kick'); else { e.knockdown(); e.vel.set(dx / (d || 1) * 7, 0, dz / (d || 1) * 7); }
-      n++;
-    }
-  }
-  if (n) { shake(0.3, 0.3); sfx.hit(player.pos); }
+function doGuard() {
+  if (player.state !== 'normal' || player.grabbedBy || player.dead || player.guardCD > 0) return;
+  player.state = 'guard'; player.stateT = 0; player.reloadT = 0; sfx.swish();
 }
 function doKnife() {
   if (player.state !== 'normal' || player.grabbedBy || player.dead) return;
@@ -2392,7 +2396,7 @@ function mixHerbs() {
 }
 function startReload() {
   const id = player.weapon, w = W(id);
-  if (player.reloadT > 0 || inv.mag[id] >= w.c || inv.ammo[id] <= 0 || player.state === 'kick' || player.grabbedBy) return;
+  if (player.reloadT > 0 || inv.mag[id] >= w.c || inv.ammo[id] <= 0 || player.state === 'guard' || player.grabbedBy) return;
   player.reloadT = player.reloadMax = w.r; sfx.reload(w.r);
 }
 function finishReload() {
@@ -2489,7 +2493,7 @@ addEventListener('keydown', e => {
   if (keys[e.code]) return; keys[e.code] = true;
   switch (e.code) {
     case 'KeyR': startReload(); break;
-    case 'KeyF': doKick(); break;
+    case 'KeyF': doGuard(); break;
     case 'KeyV': doKnife(); break;
     case 'KeyH': heal(); break;
     case 'KeyG': if (player.state === 'normal' && !player.grabbedBy) throwGrenade(); break;
@@ -2560,7 +2564,7 @@ if (isTouch) {
   const btn = (id, down, up) => { const b = $(id); b.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); down(b); }, { passive: false }); if (up) b.addEventListener('touchend', e => { e.preventDefault(); up(b); }); };
   btn('tAim', b => { input.aim = !input.aim; b.classList.toggle('on', input.aim); });
   btn('tFire', () => { input.fire = true; if (!input.aim) doKnife(); }, () => { input.fire = false; });
-  btn('tAct', () => { if (player.grabbedBy || qte.dodgeOpen) spacePressed(); else if (trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2) interact(); else doKick(); });
+  btn('tAct', () => { if (player.grabbedBy || qte.dodgeOpen) spacePressed(); else if (trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2) interact(); else doGuard(); });
   btn('tReload', () => startReload()); btn('tKnife', () => doKnife()); btn('tHeal', () => heal());
   btn('tWeap', () => cycleWeapon(1)); btn('tGren', () => throwGrenade()); btn('tTurn', () => quickTurn());
   btn('tCase', () => openCase()); btn('tNext', () => nextWave());
@@ -2621,7 +2625,7 @@ function updateHUD(dt) {
   // prompt
   let pr = '';
   if (!player.dead && !player.grabbedBy) {
-    if (kickTarget() && player.state === 'normal') pr = `<kbd>${isTouch ? '蹴り' : 'F'}</kbd>回し蹴り`;
+    if (player.state === 'normal' && player.guardCD <= 0 && enemies.some(e => e.alive && (e.state === 'windup' || e.state === 'grabWind' || e.state === 'swingWind') && e.pos.distanceTo(player.pos) < (e.boss ? 5 : 3))) pr = `<kbd>${isTouch ? 'ガード' : 'F'}</kbd>ガード！`;
     else if (trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2) pr = `<kbd>${isTouch ? 'E' : 'E'}</kbd>商人と取引`;
     else if (inv.mag[id] === 0 && inv.ammo[id] > 0 && player.reloadT <= 0) pr = `<kbd>R</kbd>リロード`;
   }
@@ -2792,7 +2796,7 @@ function updatePlayer(dt) {
   // grabbed
   if (p.grabbedBy) {
     p.grabT += dt; if (p.grabT % 1 < dt) hurtPlayer(5, p.pos, true);
-    if (p.mash >= 8) { releaseGrab(true); showLog('振りほどいた！ 蹴りで反撃だ'); }
+    if (p.mash >= 8) { releaseGrab(true); showLog('振りほどいた！'); }
     else if (p.grabT > 3) { hurtPlayer(22, p.grabbedBy.pos, true); sfx.splat(p.pos); releaseGrab(false); }
   }
   // quick turn
@@ -2805,9 +2809,9 @@ function updatePlayer(dt) {
   let mx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + input.mx, my = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + input.my;
   const ml = Math.hypot(mx, my); if (ml > 1) { mx /= ml; my /= ml; }
   // aiming slows you down to a careful walk
-  const canMove = (p.state === 'normal') && !p.grabbedBy && p.hurtT <= 0;
-  const run = (keys.ShiftLeft || keys.ShiftRight || input.run) && my > 0.3 && p.reloadT <= 0 && !p.aiming;
-  let spd = p.aiming ? 1.3 : run ? 5.4 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
+  const canMove = (p.state === 'normal' || p.state === 'guard') && !p.grabbedBy && p.hurtT <= 0;
+  const run = (keys.ShiftLeft || keys.ShiftRight || input.run) && my > 0.3 && p.reloadT <= 0 && !p.aiming && p.state !== 'guard';
+  let spd = p.state === 'guard' ? 1.1 : p.aiming ? 1.3 : run ? 5.4 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
   const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw), rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
   let tvx = 0, tvz = 0;
   if (canMove && ml > 0.05) { tvx = (fx * my + rx * mx) * spd; tvz = (fz * my + rz * mx) * spd; }
@@ -2826,24 +2830,22 @@ function updatePlayer(dt) {
   p.stepAcc += sp * dt; if (p.stepAcc > (run ? 1.5 : 1.15)) { p.stepAcc = 0; sfx.step(run); }
   p.phase += sp * dt * (run ? 2.6 : 3.2);
   // actions
-  if (p.state === 'kick') {
-    if (p.stateT > 0.26 && !p.kickHit) { p.kickHit = true; applyKick(); }
-    if (p.stateT > 0.7) p.state = 'normal';
-  }
+  p.guardCD -= dt;
+  if (p.state === 'guard' && p.stateT > GUARD_T) { p.state = 'normal'; p.guardCD = GUARD_CD; }
   if (p.state === 'knife') {
     if (p.stateT > 0.14 && !p.knifeHit) { p.knifeHit = true; applyKnife(); }
     if (p.stateT > 0.42) p.state = 'normal';
   }
   if (p.aiming && input.fire && p.fireT <= 0 && p.reloadT <= 0 && p.aim > 0.6) shoot();
   // model
-  let my2 = p.yaw + Math.PI;
-  if (p.state === 'kick') my2 = p.yaw + Math.PI + Math.min(1, p.stateT / 0.45) * Math.PI * 2;
-  p.modelYaw = p.state === 'kick' ? my2 : dampAng(p.modelYaw, my2, 16, dt);
+  p.modelYaw = dampAng(p.modelYaw, p.yaw + Math.PI, 16, dt);
   ph.root.position.copy(p.pos); ph.root.rotation.y = p.modelYaw;
   const pose = {};
   const twoHand = id !== 'hg';
-  if (p.state === 'kick') {
-    const t = p.stateT; Object.assign(pose, { rhx: -1.5, rhz: t < 0.5 ? -0.9 : 0, rkx: 0.2, lkx: 0.3, tx: -0.2, tz: 0.4, lsx: -0.6, lsz: 0.8, rsx: -0.3, rsz: -0.8, py: -0.05 });
+  if (p.state === 'guard') {
+    // forearms raised in front of the face, weight back
+    Object.assign(pose, { lsx: -1.2, lsz: -0.55, lex: -1.95, rsx: -1.1, rsz: 0.55, rex: -1.95, tx: -0.1, hx: 0.2, lhx: -0.25, lkx: 0.35, rhx: 0.2, rkx: 0.3, py: -0.06 });
+    if (sp > 0.2) { const ps = Math.sin(p.phase); pose.lhx += ps * 0.3; pose.rhx -= ps * 0.3; }
   } else if (p.state === 'knife') {
     const t = p.stateT / 0.42; Object.assign(pose, { lsx: t < 0.35 ? -2.2 : -0.6, lsz: t < 0.35 ? 0.9 : -0.6, lex: -0.3, ty: t < 0.35 ? 0.5 : -0.4, rsx: -0.4, tx: 0.15 });
   } else if (p.grabbedBy) {
@@ -2864,7 +2866,7 @@ function updatePlayer(dt) {
   }
   if (p.aim <= 0.05 && p.state === 'normal' && !p.grabbedBy) pose.hx = (pose.hx || 0) - clamp(p.pitch, -0.6, 0.5) * 0.6;
   if (p.hurtT > 0) { pose.tx = (pose.tx || 0) - 0.3; pose.hx = (pose.hx || 0) - 0.3; }
-  applyPose(ph, pose, dt, p.state === 'kick' ? 30 : 16);
+  applyPose(ph, pose, dt, p.state === 'guard' ? 28 : 16);
   knifeMesh.visible = p.state === 'knife';
   const scoped = id === 'rf' && p.aim > 0.9;
   ph.root.visible = !scoped;
