@@ -2572,9 +2572,10 @@ function updatePlayer(dt) {
   // move
   let mx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + input.mx, my = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + input.my;
   const ml = Math.hypot(mx, my); if (ml > 1) { mx /= ml; my /= ml; }
-  const canMove = !p.aiming && (p.state === 'normal') && !p.grabbedBy && p.hurtT <= 0;
-  const run = (keys.ShiftLeft || keys.ShiftRight || input.run) && my > 0.3 && p.reloadT <= 0;
-  let spd = run ? 5.4 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
+  // on touch you can walk slowly while aiming; on desktop aiming roots you in place
+  const canMove = (!p.aiming || isTouch) && (p.state === 'normal') && !p.grabbedBy && p.hurtT <= 0;
+  const run = (keys.ShiftLeft || keys.ShiftRight || input.run) && my > 0.3 && p.reloadT <= 0 && !p.aiming;
+  let spd = p.aiming ? 1.3 : run ? 5.4 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
   const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw), rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
   let tvx = 0, tvz = 0;
   if (canMove && ml > 0.05) { tvx = (fx * my + rx * mx) * spd; tvz = (fz * my + rz * mx) * spd; }
@@ -2621,6 +2622,7 @@ function updatePlayer(dt) {
       ? { rsx: a, rsz: 0.05, rex: 0, lsx: a + 0.15, lsz: -0.55, lex: -0.5, tx: 0.05, ty: 0.25, hy: -0.15, hx: -p.pitch * 0.4 }
       : { rsx: a, rsz: 0.1, rex: 0, lsx: a + 0.1, lsz: -0.35, lex: -0.25, tx: 0.05, ty: 0.1, hx: -p.pitch * 0.4 });
     pose.lhx = -0.2; pose.rhx = 0.25; pose.lkx = 0.15; pose.rkx = 0.1;
+    if (sp > 0.2) { const ps = Math.sin(p.phase), pc = Math.cos(p.phase); pose.lhx = ps * 0.4; pose.rhx = -ps * 0.4; pose.lkx = Math.max(0, -pc) * 0.6 + 0.1; pose.rkx = Math.max(0, pc) * 0.6 + 0.1; }
   } else {
     Object.assign(pose, twoHand ? { rsx: -0.6, rex: -0.8, lsx: -0.9, lsz: -0.4, lex: -1.1, tx: 0.08 } : { rsx: -0.25, rex: -0.35, lsx: 0, tx: 0.05 });
     walkPose(pose, p.phase, clamp(sp / 3, 0, run ? 1.25 : 1));
