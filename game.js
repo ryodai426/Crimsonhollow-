@@ -2615,6 +2615,44 @@ function hideQTE() { $('qte').classList.add('hidden'); qte.shown = false; }
 let shakeAmp = 0, shakeT = 0;
 function shake(a, t) { shakeAmp = Math.max(shakeAmp, a); shakeT = Math.max(shakeT, t); }
 
+// ---- radar: enemies seen (clear line of sight) within RADAR_R metres, forward is up ----
+const RADAR_R = 20, RADAR_MEM = 1.2;
+const radarCtx = $('radar').getContext('2d');
+const radar = { losT: 0, eye: new V3(), tgt: new V3() };
+function updateRadar(dt) {
+  const P = player.pos;
+  if ((radar.losT -= dt) <= 0) {
+    radar.losT = 0.1; radar.eye.set(P.x, P.y + 1.5, P.z);
+    for (const e of enemies) {
+      if (!e.alive || e.pos.distanceTo(P) > RADAR_R) continue;
+      radar.tgt.copy(e.hb.neck); if (radar.tgt.lengthSq() === 0) radar.tgt.set(e.pos.x, 1.4, e.pos.z);
+      if (segClear(radar.eye, radar.tgt)) e.radarT = RADAR_MEM;
+    }
+  }
+  const c = radarCtx, S = c.canvas.width, R = S / 2 - 2, cx = S / 2;
+  c.clearRect(0, 0, S, S);
+  c.fillStyle = 'rgba(14,10,8,.62)'; c.beginPath(); c.arc(cx, cx, R, 0, Math.PI * 2); c.fill();
+  // view cone
+  const half = Math.atan(Math.tan(camera.fov * Math.PI / 360) * camera.aspect);
+  c.fillStyle = 'rgba(232,200,120,.08)'; c.beginPath(); c.moveTo(cx, cx); c.arc(cx, cx, R, -Math.PI / 2 - half, -Math.PI / 2 + half); c.closePath(); c.fill();
+  c.strokeStyle = 'rgba(200,170,110,.25)'; c.lineWidth = 1; c.beginPath(); c.arc(cx, cx, R / 2, 0, Math.PI * 2); c.stroke();
+  c.strokeStyle = 'rgba(200,170,110,.7)'; c.lineWidth = 2; c.beginPath(); c.arc(cx, cx, R, 0, Math.PI * 2); c.stroke();
+  const sy = Math.sin(player.yaw), cy = Math.cos(player.yaw), k = R / RADAR_R;
+  for (const e of enemies) {
+    if (!(e.radarT > 0)) continue;
+    e.radarT -= dt; if (!e.alive) { e.radarT = 0; continue; }
+    const dx = e.pos.x - P.x, dz = e.pos.z - P.z;
+    const x = (dx * cy - dz * sy) * k, y = (dx * sy + dz * cy) * k; // right / back in metres → pixels
+    if (x * x + y * y > R * R) continue;
+    c.globalAlpha = Math.min(1, e.radarT / 0.4);
+    c.fillStyle = e.boss ? '#ff8a20' : '#ff2a1a'; const r = e.boss ? 5 : 3;
+    c.fillRect(Math.round(cx + x - r), Math.round(cx + y - r), r * 2, r * 2);
+  }
+  c.globalAlpha = 1;
+  // the player, pointing up
+  c.fillStyle = '#f0e8d8'; c.beginPath(); c.moveTo(cx, cx - 5); c.lineTo(cx + 4, cx + 4); c.lineTo(cx - 4, cx + 4); c.closePath(); c.fill();
+}
+
 const ecgCtx = $('ecg').getContext('2d');
 function drawECG(dt) {
   const r = player.hp / player.maxHp;
@@ -2638,6 +2676,7 @@ const htmlCache = {};
 function setH(id, html) { if (htmlCache[id] !== html) { htmlCache[id] = html; $(id).innerHTML = html; } }
 function updateHUD(dt) {
   const id = player.weapon, w = W(id);
+  updateRadar(dt);
   setH('wname', w.name);
   setH('ammo', `${inv.mag[id]} <small>/ ${inv.ammo[id]}</small>`);
   $('reloadBar').firstElementChild.style.width = player.reloadT > 0 ? `${(1 - player.reloadT / player.reloadMax) * 100}%` : '0%';
