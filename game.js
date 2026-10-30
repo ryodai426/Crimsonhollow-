@@ -1,4 +1,4 @@
-// CRIMSON HOLLOW — 赤霧の村
+// PANDEMIC ZERO — パンデミック・ゼロ
 // Over-the-shoulder survival-horror shooter. three.js, no build step.
 import * as THREE from 'three';
 

@@ -1,4 +1,4 @@
-# CRIMSON HOLLOW — 赤霧の村
+# PANDEMIC ZERO — パンデミック・ゼロ
 
 ブラウザで動く、肩越し視点のサバイバルホラーTPS（three.js製・ビルド不要）。
 
