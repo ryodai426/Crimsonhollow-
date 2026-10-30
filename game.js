@@ -130,15 +130,36 @@ const ATMOS = {
   cityRain:  { sky: [0x05070c, 0x1a2028, 0x040506], fog: 0x161a20, dens: 0.032, hs: 0x6a7a90, hg: 0x0e1012, hi: 0.55, sc: 0x8aa0c0, si: 0.6, dir: [0.2, 0.9, 0.2], exp: 1.4 },
   cityBoss:  { sky: [0x040805, 0x1e3a22, 0x020402], fog: 0x0e1a10, dens: 0.03, hs: 0x70a080, hg: 0x0a120a, hi: 0.55, sc: 0xa0ffb0, si: 0.6, dir: [-0.3, 0.7, 0.4], exp: 1.35 },
   indoor:     { sky: [0x050505, 0x0a0a0a, 0x050505], fog: 0x0c0c0e, dens: 0.045, hs: 0x8090a0, hg: 0x141210, hi: 0.3, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.45 },
-  indoorDark: { sky: [0x020202, 0x040404, 0x020202], fog: 0x050506, dens: 0.06, hs: 0x506070, hg: 0x0a0a0a, hi: 0.12, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.6 },
+  indoorDark: { sky: [0x020202, 0x040404, 0x020202], fog: 0x050506, dens: 0.06, hs: 0x506070, hg: 0x0a0a0a, hi: 0.12, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.6, vis: 0.45 },
   indoorRed:  { sky: [0x050202, 0x0a0404, 0x050202], fog: 0x140606, dens: 0.05, hs: 0xa05048, hg: 0x140808, hi: 0.22, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.5 },
   blood: { sky: [0x0a0204, 0x5a0e0c, 0x060202], fog: 0x2e0c0a, dens: 0.030, hs: 0xc06050, hg: 0x140808, hi: 0.6, sc: 0xff5a3a, si: 1.0, dir: [-0.2, 0.6, 0.5], exp: 1.2 },
 };
+// Characters (player, enemies, trader) get a slight lift so they read against dark backdrops:
+// a little self-light from their own colour, a soft rim tinted by the sky light, and thinner fog.
+// `vis` in ATMOS scales it per atmosphere (the blackout keeps it low so the flashlight still matters).
+const charUni = { charLift: { value: 0.1 }, charRim: { value: new THREE.Color() }, charFog: { value: 0.72 } };
+const charMats = new Map();
+function charMat(m) {
+  if (!m.isMeshStandardMaterial) return m;
+  if (charMats.has(m)) return charMats.get(m);
+  const c = m.clone();
+  c.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, charUni);
+    sh.fragmentShader = 'uniform float charLift; uniform vec3 charRim; uniform float charFog;\n' + sh.fragmentShader
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        float rimF = pow(1. - saturate(dot(normal, normalize(vViewPosition))), 3.);
+        totalEmissiveRadiance += diffuseColor.rgb * charLift + charRim * rimF;`)
+      .replace('#include <fog_fragment>', THREE.ShaderChunk.fog_fragment.replace('fogColor, fogFactor', 'fogColor, fogFactor * charFog'));
+  };
+  c.customProgramCacheKey = () => 'char';
+  charMats.set(m, c); return c;
+}
+function charify(root) { root.traverse(o => { if (o.isMesh) o.material = charMat(o.material); }); }
 const atm = { from: null, to: null, t: 1, cur: null };
 function atmosVals(a) {
   return {
     sky: a.sky.map(c => new THREE.Color(c)), fog: new THREE.Color(a.fog), dens: a.dens, hs: new THREE.Color(a.hs), hg: new THREE.Color(a.hg),
-    hi: a.hi, sc: new THREE.Color(a.sc), si: a.si, dir: new V3(...a.dir).normalize(), exp: a.exp,
+    hi: a.hi, sc: new THREE.Color(a.sc), si: a.si, dir: new V3(...a.dir).normalize(), exp: a.exp, vis: a.vis ?? 1,
   };
 }
 function setAtmos(name, instant) {
@@ -152,6 +173,8 @@ function applyAtmos(v) {
   hemi.color.copy(v.hs); hemi.groundColor.copy(v.hg); hemi.intensity = v.hi;
   sun.color.copy(v.sc); sun.intensity = v.si; sunDir.copy(v.dir);
   renderer.toneMappingExposure = v.exp;
+  charUni.charLift.value = 0.1 * v.vis;
+  charUni.charRim.value.copy(v.hs).multiplyScalar(0.2 * v.vis);
 }
 function updateAtmos(dt) {
   if (atm.t >= 1) return;
@@ -160,7 +183,7 @@ function updateAtmos(dt) {
   atm.cur = {
     sky: a.sky.map((c, i) => c.clone().lerp(b.sky[i], t)), fog: a.fog.clone().lerp(b.fog, t), dens: lerp(a.dens, b.dens, t),
     hs: a.hs.clone().lerp(b.hs, t), hg: a.hg.clone().lerp(b.hg, t), hi: lerp(a.hi, b.hi, t), sc: a.sc.clone().lerp(b.sc, t),
-    si: lerp(a.si, b.si, t), dir: a.dir.clone().lerp(b.dir, t).normalize(), exp: lerp(a.exp, b.exp, t),
+    si: lerp(a.si, b.si, t), dir: a.dir.clone().lerp(b.dir, t).normalize(), exp: lerp(a.exp, b.exp, t), vis: lerp(a.vis, b.vis, t),
   };
   applyAtmos(atm.cur);
 }
@@ -1669,6 +1692,7 @@ scene.add(ph.root);
 const guns = { hg: makeGun('hg'), sg: makeGun('sg'), rf: makeGun('rf') };
 for (const k in guns) { guns[k].position.set(0, -0.03, 0.02); ph.armR.hand.add(guns[k]); guns[k].visible = k === 'hg'; }
 const knifeMesh = part(ph.armL.hand, 0.02, 0.25, 0.04, mat(0xb0b0b8, { metal: 0.9, rough: 0.3 }), 0, -0.15, 0.03); knifeMesh.visible = false;
+charify(ph.root);
 
 // laser sight
 const laserMat = new THREE.MeshBasicMaterial({ color: 0xff1a1a, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -1767,6 +1791,7 @@ function makeVillager(type) {
       for (const x of [-0.14, 0.14]) part(h.hips, 0.09, 0.1, 0.06, mat(0x3a2418), x, 0.0, 0.14);
     }
   }
+  charify(h.root);
   return h;
 }
 
@@ -2184,6 +2209,7 @@ const trader = (() => {
   const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.48, 1.1, 8), mat(0x18221e)); coat.position.y = -0.35; coat.castShadow = true; h.hips.add(coat);
   const lantern = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.2, 0.14), new THREE.MeshBasicMaterial({ color: 0x60a0ff })); lantern.position.y = -0.1; h.armL.hand.add(lantern);
   const light = new THREE.PointLight(0x4a80ff, 5, 10, 1.6); light.position.y = -0.1; h.armL.hand.add(light);
+  charify(h.root);
   h.root.position.copy(TRADER_POS); h.root.rotation.y = Math.PI / 2 + 0.6; scene.add(h.root);
   const pose = { lsx: -0.9, lex: -0.9, rsx: -0.2, tx: 0.12, hx: 0.1 };
   return {
