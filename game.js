@@ -42,7 +42,9 @@ scene.fog = new THREE.FogExp2(0x4a3020, 0.024);
 
 // PS1 mode renders the scene at 240 lines into a target, then upscales it with 15-bit colour + ordered dithering
 const PSX_H = 240;
-const psxSize = () => [Math.round(PSX_H * 4 / 3), PSX_H];
+let psxW = 320, psxH = PSX_H;
+const psxSize = () => [psxW, psxH];
+const ptScale = { value: PSX_H / 2 }; // point-sprite size scale, follows the render height
 const psxRT = new THREE.WebGLRenderTarget(...psxSize(), { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
 const postScene = new THREE.Scene(), postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const postMat = new THREE.ShaderMaterial({
@@ -63,17 +65,29 @@ const postMat = new THREE.ShaderMaterial({
 postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
 // 4:3 screen inside a CRT bezel: side bars on wide displays, top/bottom bars on tall phones
 let viewW = 640, viewH = 480;
+let fovMul = 1;
 function fit() {
   const vw = innerWidth, vh = innerHeight, portrait = vh > vw;
+  const root = document.documentElement.style;
+  document.body.classList.toggle('portrait', portrait);
+  document.body.classList.toggle('landscape', !portrait);
+  if (isTouch) {
+    // phones: fill the whole screen for legibility; the short side gets 240 PS1 lines
+    viewW = vw; viewH = vh;
+    const sc = PSX_H / Math.min(vw, vh); psxW = Math.round(vw * sc); psxH = Math.round(vh * sc);
+    $('screen').style.width = vw + 'px'; $('screen').style.height = vh + 'px'; $('tv').style.marginTop = '';
+    root.setProperty('--k', clamp(Math.min(vw, vh) / 520, 0.75, 1.1).toFixed(3));
+    fovMul = clamp(1.25 / (vw / vh), 1, 1.75); // widen the view on tall screens
+  } else { psxW = 320; psxH = PSX_H; fovMul = 1; }
+  psxRT.setSize(psxW, psxH); postMat.uniforms.res.value.set(psxW, psxH); ptScale.value = psxH / 2;
+  if (isTouch) { renderer.setSize(vw, vh, false); camera.aspect = vw / vh; camera.updateProjectionMatrix(); return; }
   const bez = Math.round(clamp(Math.min(vw, vh) * (isTouch ? 0.025 : 0.035), 8, 30));
   const margin = isTouch ? 6 : 14;
   const w = Math.floor(Math.min(vw - 2 * (margin + bez), (vh - 2 * (margin + bez)) * 4 / 3)), h = Math.floor(w * 3 / 4);
   viewW = w; viewH = h;
-  const scr = $('screen'), tv = $('tv'), root = document.documentElement.style;
+  const scr = $('screen'), tv = $('tv');
   scr.style.width = w + 'px'; scr.style.height = h + 'px';
   root.setProperty('--bez', bez + 'px'); root.setProperty('--k', clamp(w / 1000, 0.55, 1.3).toFixed(3));
-  document.body.classList.toggle('portrait', portrait);
-  document.body.classList.toggle('landscape', !portrait);
   tv.style.marginTop = portrait ? Math.round((vh - h - 2 * bez) * 0.3) + 'px' : '';
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
@@ -260,6 +274,124 @@ function scaleBoxUV(geo, w, h, d, unit) {
   }
   return geo;
 }
+
+// =====================================================================
+// Title scene: a bloodied concrete wall under a flickering station light
+// =====================================================================
+const titleScene = new THREE.Scene();
+titleScene.background = new THREE.Color(0x020202);
+titleScene.fog = new THREE.FogExp2(0x030303, 0.07);
+const titleCam = new THREE.PerspectiveCamera(48, 4 / 3, 0.1, 60);
+const titleFx = { k: 1, t: 0, next: 2.5, seq: [], light: null, panel: null, cone: null, dust: null };
+function bloodSmear(g, x, y, len, ang, w) {
+  g.save(); g.translate(x, y); g.rotate(ang);
+  for (let i = 0; i < 26; i++) {
+    g.globalAlpha = rand(0.25, 0.6); g.fillStyle = pick(['#4a0806', '#5e0a08', '#360504', '#6a100c']);
+    const t = i / 26; g.beginPath(); g.ellipse(t * len, rand(-w * 0.2, w * 0.2), len / 22, w * (1 - t * 0.7) * rand(0.6, 1), 0, 0, 7); g.fill();
+  }
+  for (let i = 0; i < 4; i++) { const dx = rand(0, len * 0.6); g.globalAlpha = 0.55; g.fillStyle = '#3e0605'; g.fillRect(dx, 0, rand(2, 4), rand(30, 120)); }
+  g.restore(); g.globalAlpha = 1;
+}
+function handPrint(g, x, y, s, ang) {
+  g.save(); g.translate(x, y); g.rotate(ang); g.fillStyle = '#4e0806'; g.globalAlpha = 0.75;
+  g.beginPath(); g.ellipse(0, 0, 11 * s, 13 * s, 0, 0, 7); g.fill();
+  [[-9, -20, 0.25], [-3, -24, 0.05], [3, -23, -0.05], [9, -19, -0.25], [14, -4, -1.0]].forEach(([fx, fy, r]) => { g.save(); g.translate(fx * s, fy * s); g.rotate(r); g.beginPath(); g.ellipse(0, 0, 2.6 * s, 8 * s, 0, 0, 7); g.fill(); g.restore(); });
+  g.fillRect(-2 * s, 10 * s, 3 * s, rand(30, 80)); g.restore(); g.globalAlpha = 1;
+}
+function buildTitleScene() {
+  const wallTex = canvasTex(1024, (g, s) => {
+    g.fillStyle = '#5c5850'; g.fillRect(0, 0, s, s);
+    speckle(g, s, 60, ['#4a463e', '#6a665c', '#3e3a34'], 20, 90, 0.08, 0.2);
+    speckle(g, s, 9000, ['#3a3630', '#77726a', '#4c4840', '#2c2a26'], 0.6, 2, 0.3, 0.8);
+    // formwork seams and tie holes
+    g.fillStyle = 'rgba(20,18,16,.55)'; for (let y = 256; y < s; y += 256) g.fillRect(0, y - 2, s, 4); for (let x = 0; x < s; x += 340) g.fillRect(x - 2, 0, 3, s);
+    for (let y = 128; y < s; y += 256) for (let x = 80; x < s; x += 170) { g.fillStyle = '#1a1814'; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); g.fillStyle = 'rgba(80,40,20,.35)'; g.fillRect(x - 2, y + 4, 4, rand(20, 70)); }
+    // water stains running down
+    for (let i = 0; i < 26; i++) { g.fillStyle = `rgba(${randi(40, 70)},${randi(30, 45)},${randi(18, 28)},${rand(0.12, 0.3)})`; g.fillRect(rand(0, s), rand(0, s * 0.3), rand(4, 22), rand(120, 500)); }
+    // chipped concrete: dark holes with pale rims
+    for (let i = 0; i < 22; i++) {
+      const x = rand(0, s), y = rand(s * 0.45, s), r = rand(4, 14);
+      g.fillStyle = '#8a857a'; g.beginPath(); g.ellipse(x + 2, y + 2, r * 1.15, r * 0.8, rand(0, 3), 0, 7); g.fill();
+      g.fillStyle = '#26231f'; g.beginPath(); g.ellipse(x, y, r, r * 0.65, rand(0, 3), 0, 7); g.fill();
+    }
+    // cracks
+    g.strokeStyle = '#191714'; for (let i = 0; i < 18; i++) { g.lineWidth = rand(1, 3); g.beginPath(); let x = rand(0, s), y = rand(0, s); g.moveTo(x, y); for (let k = 0; k < 9; k++) { x += rand(-40, 40); y += rand(-10, 45); g.lineTo(x, y); } g.stroke(); }
+    // bullet holes
+    for (let i = 0; i < 18; i++) { const x = rand(150, s - 150), y = rand(520, 860); g.fillStyle = '#9a958a'; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); g.fillStyle = '#0c0b0a'; g.beginPath(); g.arc(x, y, 3.5, 0, 7); g.fill(); }
+    // blood
+    bloodSmear(g, 250, 760, 300, -0.2, 30); bloodSmear(g, 560, 820, 260, 0.3, 24); bloodSmear(g, 700, 610, 150, 1.25, 16);
+    handPrint(g, 390, 690, 1.5, 0.2); handPrint(g, 440, 715, 1.4, 0.5); handPrint(g, 640, 700, 1.6, -0.3); handPrint(g, 300, 640, 1.3, -0.1);
+    for (let i = 0; i < 260; i++) { g.fillStyle = pick(['#4a0806', '#5e0a08', '#2e0404']); g.globalAlpha = rand(0.4, 0.9); g.beginPath(); g.arc(rand(580, 760) + rand(-50, 50), rand(560, 680) + rand(-50, 50), rand(1, 4), 0, 7); g.fill(); }
+    g.globalAlpha = 1;
+    // grime toward the floor
+    const gr = g.createLinearGradient(0, s * 0.7, 0, s); gr.addColorStop(0, 'rgba(10,8,6,0)'); gr.addColorStop(1, 'rgba(10,8,6,.7)'); g.fillStyle = gr; g.fillRect(0, 0, s, s);
+  }, 1);
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(12, 12, 12, 12), new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.95 }));
+  wall.position.set(0, 5.6, -4); wall.receiveShadow = true; titleScene.add(wall);
+  const floorTex = canvasTex(512, (g, s) => {
+    g.fillStyle = '#34312c'; g.fillRect(0, 0, s, s); speckle(g, s, 5000, ['#25231f', '#45423b', '#1c1a17'], 0.6, 2, 0.3, 0.8);
+    g.globalAlpha = 0.85; g.fillStyle = '#3a0605'; g.beginPath(); g.ellipse(s * 0.62, s * 0.3, 70, 34, 0.2, 0, 7); g.fill();
+    for (let i = 0; i < 40; i++) { g.beginPath(); g.arc(s * 0.62 + rand(-120, 120), s * 0.3 + rand(-60, 60), rand(2, 7), 0, 7); g.fill(); }
+    g.globalAlpha = 1;
+  }, 3);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 12, 10, 6), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
+  floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, 1); floor.receiveShadow = true; titleScene.add(floor);
+  // drums: two standing on the left, one dented on the right, one toppled
+  const drumTex = (base, rustA) => canvasTex(256, (g, s) => {
+    g.fillStyle = base; g.fillRect(0, 0, s, s);
+    for (const y of [s * 0.2, s * 0.5, s * 0.8]) { g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(0, y - 4, s, 8); g.fillStyle = 'rgba(255,255,255,.08)'; g.fillRect(0, y - 6, s, 2); }
+    speckle(g, s, 40, ['#5a2a10', '#7a3a14', '#3a1a0a'], 6, 26, rustA * 0.5, rustA);
+    for (let i = 0; i < 20; i++) { g.fillStyle = `rgba(90,40,14,${rand(0.2, 0.5) * rustA})`; g.fillRect(rand(0, s), rand(0, s * 0.5), rand(2, 6), rand(30, 120)); }
+    speckle(g, s, 1200, ['rgba(0,0,0,.4)', 'rgba(255,255,255,.12)'], 0.5, 1.4, 0.3, 0.6);
+  });
+  const drumGeo = new THREE.CylinderGeometry(0.42, 0.42, 1.12, 14);
+  const drum = (tex, x, z, rx = 0, rz = 0, ry = 0, y = 0.56) => {
+    const m = new THREE.Mesh(drumGeo, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, metalness: 0.3 }));
+    m.position.set(x, y, z); m.rotation.set(rx, ry, rz); m.castShadow = m.receiveShadow = true; titleScene.add(m); return m;
+  };
+  const red = drumTex('#7a1a10', 0.8), blue = drumTex('#2a3a48', 1), yel = drumTex('#8a6a1a', 0.9);
+  drum(red, -3.3, -3.2, 0, 0, 0.4); drum(blue, -2.4, -3.45, 0, 0, 1.3); drum(yel, -2.85, -2.45, 0, 0, 2.1);
+  drum(red, 3.4, -3.3, 0.06, 0.08, 0.8);
+  drum(blue, 2.3, -2.1, 0, Math.PI / 2, 0.5, 0.42); // toppled
+  { const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.03, 14), new THREE.MeshStandardMaterial({ color: 0x2a3a48, roughness: 0.6, metalness: 0.4 })); lid.position.set(1.3, 0.02, -1.5); lid.rotation.y = 0.4; lid.receiveShadow = true; titleScene.add(lid); }
+  for (let i = 0; i < 9; i++) { const d = new THREE.Mesh(new THREE.BoxGeometry(rand(0.08, 0.3), rand(0.05, 0.15), rand(0.08, 0.3)), new THREE.MeshStandardMaterial({ color: 0x4a4740, roughness: 1 })); d.position.set(rand(-4, 4), 0.05, rand(-3.8, -1)); d.rotation.y = rand(0, 3); d.castShadow = true; titleScene.add(d); }
+  // the light: a caged fluorescent fixture hanging at the top of the frame
+  const fx = new THREE.Group(); fx.position.set(0.3, 5.4, -2.2); titleScene.add(fx);
+  fx.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 0.42), new THREE.MeshStandardMaterial({ color: 0x2a2a28, metalness: 0.6, roughness: 0.4 })));
+  titleFx.panel = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.04, 0.24), new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xfff2d6, emissiveIntensity: 2 }));
+  titleFx.panel.position.y = -0.08; fx.add(titleFx.panel);
+  for (const sx of [-0.7, 0.7]) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.02, 2, 0.02), new THREE.MeshStandardMaterial({ color: 0x1a1a1a })); c.position.set(sx, 1.0, 0); fx.add(c); }
+  const spot = new THREE.SpotLight(0xffeccc, 85, 22, 0.9, 0.65, 1.2);
+  spot.position.set(0.3, 5.25, -2.2); spot.target.position.set(0, 1.6, -4); spot.castShadow = true; spot.shadow.mapSize.set(512, 512); spot.shadow.bias = -0.002;
+  titleScene.add(spot, spot.target); titleFx.light = spot;
+  titleFx.fill = new THREE.PointLight(0xffe0b0, 2.5, 9, 1.5); titleFx.fill.position.set(0.3, 4.9, -1.6); titleScene.add(titleFx.fill);
+  titleScene.add(new THREE.HemisphereLight(0x506070, 0x0c0906, 0.3));
+  // faint light cone and drifting dust
+  titleFx.cone = new THREE.Mesh(new THREE.ConeGeometry(2.6, 5.2, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe6b8, transparent: true, opacity: 0.012, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  titleFx.cone.position.set(0.25, 2.75, -2.7); titleScene.add(titleFx.cone);
+  const N = 60, dp = new Float32Array(N * 3); for (let i = 0; i < N; i++) { dp[i * 3] = rand(-2.4, 2.6); dp[i * 3 + 1] = rand(0.2, 5); dp[i * 3 + 2] = rand(-3.8, -1.2); }
+  const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.BufferAttribute(dp, 3));
+  titleFx.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0xfff0d0, size: 0.01, transparent: true, opacity: 0.25, depthWrite: false }));
+  titleScene.add(titleFx.dust);
+}
+function updateTitleScene(dt) {
+  const f = titleFx; f.t += dt;
+  // mostly steady; now and then a short, gentle flicker burst
+  if (!f.seq.length && f.t > f.next) {
+    const n = randi(2, 5); for (let i = 0; i < n; i++) f.seq.push([rand(0.04, 0.12), rand(0.35, 0.7)], [rand(0.05, 0.2), rand(0.85, 1)]);
+    if (Math.random() < 0.25) f.seq.push([rand(0.25, 0.5), 0.45]);
+    f.next = f.t + rand(2.5, 6.5);
+  }
+  let target = 1 + Math.sin(f.t * 47) * 0.015 + (Math.random() - 0.5) * 0.02;
+  if (f.seq.length) { f.seq[0][0] -= dt; target = f.seq[0][1]; if (f.seq[0][0] <= 0) f.seq.shift(); }
+  f.k = target;
+  f.light.intensity = 85 * f.k; f.fill.intensity = 2.5 * f.k; f.panel.material.emissiveIntensity = 2 * f.k; f.cone.material.opacity = 0.012 * f.k;
+  document.documentElement.style.setProperty('--flick', f.k.toFixed(3));
+  const p = f.dust.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.getY(i) - dt * 0.05; if (y < 0.1) y = 5; p.setY(i, y); p.setX(i, p.getX(i) + Math.sin(f.t * 0.5 + i) * dt * 0.02); } p.needsUpdate = true;
+  titleCam.position.set(Math.sin(f.t * 0.13) * 0.18, 2.2 + Math.sin(f.t * 0.21) * 0.05, 5.2);
+  titleCam.lookAt(0, 2.25, -4);
+}
+buildTitleScene();
 
 // =====================================================================
 // World: solids, props, nav grid
@@ -610,7 +742,7 @@ class Particles {
     g.setAttribute('palpha', new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
     this.geo = g;
     this.mat = new THREE.ShaderMaterial({
-      uniforms: { scale: { value: PSX_H / 2 } }, defines: PSX ? { LINEARIZE: '' } : {}, transparent: true, depthWrite: false, blending,
+      uniforms: { scale: ptScale }, defines: PSX ? { LINEARIZE: '' } : {}, transparent: true, depthWrite: false, blending,
       vertexShader: `attribute vec3 pcolor; attribute float psize; attribute float palpha; uniform float scale; varying vec3 vC; varying float vA;
         void main(){ vC = pcolor; vA = palpha; vec4 mv = modelViewMatrix * vec4(position, 1.); gl_PointSize = psize * scale / max(.1, -mv.z); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `varying vec3 vC; varying float vA; void main(){ vec2 c = gl_PointCoord - .5; float d = length(c); if (d > .5) discard; vec3 col = vC;\n#ifdef LINEARIZE\ncol = pow(col, vec3(2.2));\n#endif\ngl_FragColor = vec4(col, vA * step(d, .42)); }`,
@@ -2742,7 +2874,7 @@ function updateCamera(dt) {
   if (p.dead) camLook.copy(p.pos).setY(0.4);
   camera.lookAt(camLook);
   if (shakeT > 0) { shakeT -= dt; const s = shakeAmp * Math.min(1, shakeT * 4); camera.rotation.x += rand(-s, s) * 0.05; camera.rotation.y += rand(-s, s) * 0.05; camera.position.x += rand(-s, s) * 0.06; camera.position.y += rand(-s, s) * 0.06; } else shakeAmp = 0;
-  camera.fov = camSmooth.fov; camera.updateProjectionMatrix();
+  camera.fov = Math.min(100, camSmooth.fov * fovMul); camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   flashlight.intensity = STAGE.flashlight && !p.dead ? 40 : 0;
   flashlight.position.copy(camPivot).addScaledVector(d, 0.3); flashlight.target.position.copy(camLook);
@@ -2771,13 +2903,13 @@ function updateLaser() {
 // Main loop
 // =====================================================================
 let last = performance.now();
-let titleT = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   tick(dt);
-  if (PSX) { renderer.setRenderTarget(psxRT); renderer.render(scene, camera); renderer.setRenderTarget(null); renderer.render(postScene, postCam); }
-  else renderer.render(scene, camera);
+  const title = game.state === 'title';
+  renderer.setRenderTarget(psxRT); renderer.render(title ? titleScene : scene, title ? titleCam : camera);
+  renderer.setRenderTarget(null); renderer.render(postScene, postCam);
 }
 function tick(dt) {
   updateAtmos(dt);
@@ -2792,10 +2924,8 @@ function tick(dt) {
     updateDirector(dt);
     updateCamera(dt); updateLaser(); updateHUD(dt);
   } else if (game.state === 'title') {
-    titleT += dt;
-    const a = titleT * 0.05; camera.position.set(Math.sin(a) * 26, 7 + Math.sin(titleT * 0.2), Math.cos(a) * 26); camera.lookAt(0, 3, -10);
-    camera.fov = 55; camera.updateProjectionMatrix();
-    sun.position.set(0, 0, 0).addScaledVector(sunDir, 50); sun.target.position.set(0, 0, 0);
+    updateTitleScene(dt);
+    titleCam.aspect = viewW / viewH; titleCam.fov = Math.min(90, 48 * fovMul); titleCam.updateProjectionMatrix();
     laser.visible = laserDot.visible = false;
   } else if (game.state === 'dead') {
     player.stateT += dt; updatePlayer(dt); updateCamera(dt);
