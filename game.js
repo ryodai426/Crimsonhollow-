@@ -19,7 +19,7 @@ const PSX = true;
 {
   // snap vertices to a coarse screen grid (the wobbly PS1 polygons); skipped for shadow depth passes
   THREE.ShaderChunk.project_vertex = THREE.ShaderChunk.project_vertex.replace('gl_Position = projectionMatrix * mvPosition;',
-    'gl_Position = projectionMatrix * mvPosition;\n#ifndef DEPTH_PACKING\n{ vec2 g = vec2(160.0, 120.0); gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g + 0.5) / g * gl_Position.w; }\n#endif');
+    'gl_Position = projectionMatrix * mvPosition;\n#ifndef DEPTH_PACKING\nif (gl_Position.w > 0.1) { vec2 g = vec2(160.0, 120.0); gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g + 0.5) / g * gl_Position.w; }\n#endif');
 }
 if (isTouch) document.body.classList.add('touch');
 
@@ -37,7 +37,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(65, 4 / 3, 0.05, 260);
+const camera = new THREE.PerspectiveCamera(65, 4 / 3, 0.1, 260);
 scene.fog = new THREE.FogExp2(0x4a3020, 0.024);
 
 // PS1 mode renders the scene at 240 lines into a target, then upscales it with 15-bit colour + ordered dithering
@@ -252,7 +252,8 @@ function mat(color, o = {}) {
 }
 const M = {
   ground: new THREE.MeshStandardMaterial({ map: texDirt, roughness: 1 }),
-  plaza: new THREE.MeshStandardMaterial({ map: texPlaza, roughness: 1 }),
+  plaza: new THREE.MeshStandardMaterial({ map: texPlaza, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }),
+  plazaRoad: new THREE.MeshStandardMaterial({ map: texPlaza, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 }),
   plank: new THREE.MeshStandardMaterial({ map: texPlank, roughness: 0.95 }),
   stone: new THREE.MeshStandardMaterial({ map: texStone, roughness: 0.95 }),
   plaster: new THREE.MeshStandardMaterial({ map: texPlaster, roughness: 0.95 }),
@@ -519,13 +520,13 @@ function brazier(x, z, light = true) {
 function buildVillage() {
   // ground
   {
-    const g = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), M.ground);
+    const g = new THREE.Mesh(new THREE.PlaneGeometry(300, 300, 38, 38), M.ground);
     g.rotation.x = -Math.PI / 2; g.receiveShadow = true; world.add(g);
-    const p = new THREE.Mesh(new THREE.CircleGeometry(15, 48), M.plaza);
-    p.rotation.x = -Math.PI / 2; p.position.y = 0.01; p.receiveShadow = true; world.add(p);
+    const p = new THREE.Mesh(new THREE.CircleGeometry(15, 32), M.plaza);
+    p.rotation.x = -Math.PI / 2; p.position.y = 0.015; p.receiveShadow = true; world.add(p);
     // dirt road to church
-    const r = new THREE.Mesh(new THREE.PlaneGeometry(5, 16), M.plaza);
-    r.rotation.x = -Math.PI / 2; r.position.set(0, 0.012, -20); r.receiveShadow = true; world.add(r);
+    const r = new THREE.Mesh(new THREE.PlaneGeometry(5, 16, 1, 4), M.plaza);
+    r.material = M.plazaRoad; r.rotation.x = -Math.PI / 2; r.position.set(0, 0.03, -20); r.receiveShadow = true; world.add(r);
   }
 
 
@@ -818,12 +819,12 @@ function fxMuzzle(p, dir, big) {
 // blood decals
 const decals = [];
 const decalGeo = new THREE.CircleGeometry(0.5, 12);
-const decalMat = new THREE.MeshBasicMaterial({ color: 0x3a0404, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+const decalMat = new THREE.MeshBasicMaterial({ color: 0x3a0404, transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -12 });
 function addDecal(x, z, s) {
   let d;
   if (decals.length < 70) { d = new THREE.Mesh(decalGeo, decalMat); d.rotation.x = -Math.PI / 2; scene.add(d); decals.push(d); }
   else { d = decals.shift(); decals.push(d); }
-  d.position.set(x, 0.025 + Math.random() * 0.005, z); d.scale.set(s * rand(0.8, 1.3), s * rand(0.6, 1.1), 1); d.rotation.z = rand(0, 6);
+  d.position.set(x, 0.06 + Math.random() * 0.005, z); d.scale.set(s * rand(0.8, 1.3), s * rand(0.6, 1.1), 1); d.rotation.z = rand(0, 6);
 }
 
 // flash light pool for explosions/muzzle
@@ -1170,7 +1171,8 @@ function stall(x, z, rotY) {
 // ---- STAGE 2: city ----
 function planeUV(geo, sx, sy) { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * sx, uv.getY(i) * sy); return geo; }
 function groundPlane(x, z, w, d, m, unit, y = 0) {
-  const me = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(w, d), w / unit, d / unit), m);
+  // subdivided into ~8 m tiles so the PS1 vertex snapping stays stable on big floors
+  const me = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(w, d, Math.max(1, Math.round(w / 8)), Math.max(1, Math.round(d / 8))), w / unit, d / unit), m);
   me.rotation.x = -Math.PI / 2; me.position.set(x, y, z); me.receiveShadow = true; world.add(me); return me;
 }
 let CITY = null; // city materials are created on first use
@@ -1216,15 +1218,15 @@ function cityAssets() {
   };
   const stripes = canvasTex(128, (g, s) => { g.fillStyle = '#e0dcd0'; g.fillRect(0, 0, s, s); g.fillStyle = '#e05a10'; for (let i = -s; i < s * 2; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 16, 0); g.lineTo(i + 16 - s, s); g.lineTo(i - s, s); g.fill(); } });
   CITY = {
-    road: new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.35, metalness: 0.15 }),
+    road: new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.35, metalness: 0.15, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }),
     walk: new THREE.MeshStandardMaterial({ map: concrete, roughness: 0.75 }),
     fac: { brick: [facade('#5a2a20', true), facade('#4a261e', true)], concrete: [facade('#55575a', false), facade('#4a4c50', false)], tan: [facade('#7a6a50', false), facade('#6a5c48', true)] },
     store: new THREE.MeshStandardMaterial({ color: 0x18151a, roughness: 0.6 }),
     shopLit: new THREE.MeshStandardMaterial({ color: 0x302010, emissive: 0xffa860, emissiveIntensity: 0.6 }),
     shopDark: new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.2, metalness: 0.5 }),
     trim: new THREE.MeshStandardMaterial({ color: 0x2c2c2e, roughness: 0.8 }),
-    lineY: new THREE.MeshStandardMaterial({ color: 0xc89a30, roughness: 0.6 }),
-    lineW: new THREE.MeshStandardMaterial({ color: 0xc8c4b8, roughness: 0.6 }),
+    lineY: new THREE.MeshStandardMaterial({ color: 0xc89a30, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 }),
+    lineW: new THREE.MeshStandardMaterial({ color: 0xc8c4b8, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 }),
     stripes: new THREE.MeshStandardMaterial({ map: stripes, roughness: 0.7 }),
     tire: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 }),
     glass: new THREE.MeshStandardMaterial({ color: 0x101418, roughness: 0.15, metalness: 0.7 }),
@@ -1321,11 +1323,11 @@ function buildCity() {
   const C = cityAssets();
   // ground: sidewalks everywhere, roads on the two avenues
   groundPlane(0, 0, 300, 300, C.walk, 4);
-  groundPlane(0, 0, 14, 92, C.road, 8, 0.012);
-  groundPlane(0, 0, 92, 14, C.road, 8, 0.011);
-  for (let z = -32; z <= 44; z += 4) if (Math.abs(z) > 9) groundPlane(0, z, 0.18, 2, C.lineY, 1, 0.02);
-  for (let x = -44; x <= 44; x += 4) if (Math.abs(x) > 9) groundPlane(x, 0, 2, 0.18, C.lineY, 1, 0.02);
-  for (const s of [-1, 1]) for (let i = -6; i <= 6; i += 1.2) { groundPlane(i, s * 8.4, 0.6, 2.6, C.lineW, 1, 0.02); groundPlane(s * 8.4, i, 2.6, 0.6, C.lineW, 1, 0.02); }
+  groundPlane(0, 0, 14, 92, C.road, 8, 0.03);
+  for (const sx of [-1, 1]) groundPlane(sx * 26.5, 0, 39, 14, C.road, 8, 0.03);
+  for (let z = -32; z <= 44; z += 4) if (Math.abs(z) > 9) groundPlane(0, z, 0.18, 2, C.lineY, 1, 0.05);
+  for (let x = -44; x <= 44; x += 4) if (Math.abs(x) > 9) groundPlane(x, 0, 2, 0.18, C.lineY, 1, 0.05);
+  for (const s of [-1, 1]) for (let i = -6; i <= 6; i += 1.2) { groundPlane(i, s * 8.4, 0.6, 2.6, C.lineW, 1, 0.05); groundPlane(s * 8.4, i, 2.6, 0.6, C.lineW, 1, 0.05); }
   // blocks
   makeBuilding(-16, -13, 13, 8, 12, 'brick', 'pz', { sign: 'DINER', color: '#40e0ff' });
   makeBuilding(-15, -27, 11, 12, 18, 'concrete', 'px');
@@ -1530,7 +1532,7 @@ function buildStationInterior() {
   // underground garage (boss arena)
   room(-18, 18, -43, -18, 6, C.road, { s: [[-2, 2]], w: [[-24, -20]], e: [[-24, -20]] });
   for (const x of [-9, 9]) for (const z of [-36, -27]) { meshAt(new THREE.BoxGeometry(1.1, 6, 1.1), mat(0x5a5a56), x, 3, z); addSolid(x, z, 1.1, 1.1, 6); }
-  for (let x = -15; x <= 15; x += 5) groundPlane(x, -40.5, 0.12, 4, C.lineW, 1, 0.02);
+  for (let x = -15; x <= 15; x += 5) groundPlane(x, -40.5, 0.12, 4, C.lineW, 1, 0.05);
   car(-13, -40, 0, 0x101418, { police: true, light: true }); car(13, -40.2, 0.05, 0x101418, { police: true }); car(-3.5, -26.5, Math.PI / 2 + 0.25, 0x6a6a64);
   meshAt(new THREE.BoxGeometry(10, 4.5, 0.1), mat(0x5a5650, { metal: 0.5, rough: 0.5 }), 0, 2.25, -42.75, world, false);
   ceilingLight(-6, -30, 6, { light: true, color: 0xc8e0ff, i: 12, dist: 20 }); ceilingLight(6, -36, 6, { light: true, color: 0xc8e0ff, i: 12, dist: 20, mode: 'flicker' });
