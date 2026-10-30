@@ -69,6 +69,9 @@ const ATMOS = {
   cityNight: { sky: [0x06080f, 0x2a2430, 0x05060a], fog: 0x1a1a22, dens: 0.026, hs: 0x7080b0, hg: 0x141418, hi: 0.55, sc: 0x9ab0e0, si: 0.7, dir: [0.4, 0.8, 0.3], exp: 1.35 },
   cityRain:  { sky: [0x05070c, 0x1a2028, 0x040506], fog: 0x161a20, dens: 0.032, hs: 0x6a7a90, hg: 0x0e1012, hi: 0.55, sc: 0x8aa0c0, si: 0.6, dir: [0.2, 0.9, 0.2], exp: 1.4 },
   cityBoss:  { sky: [0x040805, 0x1e3a22, 0x020402], fog: 0x0e1a10, dens: 0.03, hs: 0x70a080, hg: 0x0a120a, hi: 0.55, sc: 0xa0ffb0, si: 0.6, dir: [-0.3, 0.7, 0.4], exp: 1.35 },
+  indoor:     { sky: [0x050505, 0x0a0a0a, 0x050505], fog: 0x0c0c0e, dens: 0.045, hs: 0x8090a0, hg: 0x141210, hi: 0.3, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.45 },
+  indoorDark: { sky: [0x020202, 0x040404, 0x020202], fog: 0x050506, dens: 0.06, hs: 0x506070, hg: 0x0a0a0a, hi: 0.12, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.6 },
+  indoorRed:  { sky: [0x050202, 0x0a0404, 0x050202], fog: 0x140606, dens: 0.05, hs: 0xa05048, hg: 0x140808, hi: 0.22, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.5 },
   blood: { sky: [0x0a0204, 0x5a0e0c, 0x060202], fog: 0x2e0c0a, dens: 0.030, hs: 0xc06050, hg: 0x140808, hi: 0.6, sc: 0xff5a3a, si: 1.0, dir: [-0.2, 0.6, 0.5], exp: 1.2 },
 };
 const atm = { from: null, to: null, t: 1, cur: null };
@@ -1146,6 +1149,7 @@ function buildCity() {
   for (const sx of [-7.5, -3.5, 3.5, 7.5]) { meshAt(new THREE.CylinderGeometry(0.4, 0.45, 8, 10), mat(0x8a8884), sx, 4, -32.4); addSolid(sx, -32.4, 0.9, 0.9, 8); }
   meshAt(new THREE.BoxGeometry(18, 0.5, 2.6), mat(0x7a7874), 0, 8.2, -32.2);
   for (let i = 0; i < 3; i++) meshAt(new THREE.BoxGeometry(10, 0.18, 0.6), mat(0x6a6864), 0, 0.09 + i * 0.18, -31.2 - i * 0.6);
+  for (const sx of [-1, 1]) meshAt(new THREE.PlaneGeometry(1.9, 3.2), M.door, sx * 1.0, 1.6, -32.87, world, false);
   // skyline beyond the playable streets
   for (let i = 0; i < 40; i++) {
     const a = i / 40 * Math.PI * 2 + rand(-0.05, 0.05), r = rand(54, 80), w = rand(10, 20), h = rand(18, 55);
@@ -1185,6 +1189,167 @@ function buildCity() {
   stall(8.9, 13.6, Math.PI / 2);
 }
 
+// ---- STAGE 3: police station interior ----
+const lamps = [];   // interior lights: {light, base, mode, mesh, t}
+let IN = null;
+function stationAssets() {
+  if (IN) return IN;
+  const wall = canvasTex(256, (g, s) => {
+    g.fillStyle = '#8a846c'; g.fillRect(0, 0, s, s);
+    speckle(g, s, 30, ['#6a644e', '#9a947c', '#5a5444'], 10, 40, 0.08, 0.2);
+    speckle(g, s, 1500, ['#5a5444', '#a09a84'], 0.5, 1.4, 0.2, 0.4);
+    const band = s * 0.64;
+    g.fillStyle = '#3a2a1e'; g.fillRect(0, band, s, s - band);
+    g.fillStyle = 'rgba(0,0,0,.35)'; for (let x = 0; x < s; x += 64) g.fillRect(x, band, 3, s - band);
+    g.fillStyle = '#24180f'; g.fillRect(0, band - 6, s, 8);
+    g.fillStyle = 'rgba(60,10,8,.5)'; for (let i = 0; i < 3; i++) { const x = rand(0, s); g.fillRect(x, rand(band - 80, band), rand(2, 5), rand(30, 90)); }
+  });
+  const marble = canvasTex(256, (g, s) => {
+    for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) { g.fillStyle = (x + y) % 2 ? '#2c2a27' : '#7a766c'; g.fillRect(x * s / 2, y * s / 2, s / 2, s / 2); }
+    g.strokeStyle = 'rgba(255,255,255,.12)'; for (let i = 0; i < 10; i++) { g.beginPath(); let x = rand(0, s), y = rand(0, s); g.moveTo(x, y); for (let k = 0; k < 5; k++) { x += rand(-30, 30); y += rand(-30, 30); g.lineTo(x, y); } g.stroke(); }
+    speckle(g, s, 800, ['rgba(0,0,0,.4)'], 0.5, 1.2, 0.2, 0.4);
+  });
+  const tile = canvasTex(256, (g, s) => {
+    g.fillStyle = '#4e4e48'; g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s; y += 32) for (let x = 0; x < s; x += 32) { g.fillStyle = pick(['#56564f', '#4a4a44', '#5c5a52']); g.fillRect(x + 1, y + 1, 30, 30); }
+    speckle(g, s, 40, ['rgba(40,30,20,.3)'], 4, 16, 0.2, 0.5);
+  });
+  const carpet = canvasTex(256, (g, s) => { g.fillStyle = '#2e3440'; g.fillRect(0, 0, s, s); speckle(g, s, 4000, ['#262b35', '#384050', '#20242c'], 0.5, 1.4, 0.4, 0.9); speckle(g, s, 8, ['rgba(60,10,8,.6)'], 8, 20, 0.3, 0.6); });
+  const ceil = canvasTex(256, (g, s) => { g.fillStyle = '#3a3a36'; g.fillRect(0, 0, s, s); g.fillStyle = '#26261f'; for (let i = 0; i <= s; i += 64) { g.fillRect(i, 0, 3, s); g.fillRect(0, i, s, 3); } speckle(g, s, 12, ['rgba(60,40,20,.4)'], 6, 22, 0.2, 0.5); });
+  IN = {
+    wall: new THREE.MeshStandardMaterial({ map: wall, roughness: 0.9 }),
+    marble: new THREE.MeshStandardMaterial({ map: marble, roughness: 0.25, metalness: 0.1 }),
+    tile: new THREE.MeshStandardMaterial({ map: tile, roughness: 0.6 }),
+    carpet: new THREE.MeshStandardMaterial({ map: carpet, roughness: 1 }),
+    ceil: new THREE.MeshStandardMaterial({ map: ceil, roughness: 1, side: THREE.DoubleSide }),
+    panel: new THREE.MeshStandardMaterial({ color: 0x202020, emissive: 0xe8f0ff, emissiveIntensity: 1.2 }),
+    panelOff: new THREE.MeshStandardMaterial({ color: 0x1a1a1a }),
+    desk: new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 0.7 }),
+    steel: new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.5, metalness: 0.6 }),
+    locker: new THREE.MeshStandardMaterial({ color: 0x3a4a5a, roughness: 0.5, metalness: 0.4 }),
+    paper: new THREE.MeshStandardMaterial({ color: 0xc8c0b0, roughness: 1 }),
+  };
+  return IN;
+}
+const WALL_T = 0.4;
+function wallSeg(x0, z0, x1, z1, h) { // axis-aligned, (x0,z0)-(x1,z1)
+  const I = stationAssets();
+  const w = Math.abs(x1 - x0) || WALL_T, d = Math.abs(z1 - z0) || WALL_T;
+  if (w < 0.05 || d < 0.05) return;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  meshAt(scaleBoxUV(new THREE.BoxGeometry(w, h, d), w, h, d, 4), I.wall, cx, h / 2, cz);
+  addSolid(cx, cz, w, d, h);
+}
+// a straight wall along X (fixed z) or Z (fixed x) from a to b, leaving gaps
+function wallLine(axis, fixed, a, b, h, gaps = []) {
+  const cuts = [...gaps].sort((p, q) => p[0] - q[0]); let s = a;
+  for (const [g0, g1] of cuts) { if (g0 > s) seg(s, g0); s = Math.max(s, g1); }
+  if (b > s) seg(s, b);
+  function seg(p, q) { if (axis === 'x') wallSeg(p, fixed, q, fixed, h); else wallSeg(fixed, p, fixed, q, h); }
+}
+function floorCeil(x0, x1, z0, z1, h, floorMat, unit = 2) {
+  const I = stationAssets();
+  groundPlane((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, floorMat, unit, 0.01);
+  const c = groundPlane((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, I.ceil, 2, h); c.rotation.x = Math.PI / 2;
+}
+function room(x0, x1, z0, z1, h, floorMat, doors = {}) {
+  floorCeil(x0, x1, z0, z1, h, floorMat);
+  wallLine('x', z0, x0 - WALL_T / 2, x1 + WALL_T / 2, h, doors.n);
+  wallLine('x', z1, x0 - WALL_T / 2, x1 + WALL_T / 2, h, doors.s);
+  wallLine('z', x0, z0, z1, h, doors.w);
+  wallLine('z', x1, z0, z1, h, doors.e);
+}
+function ceilingLight(x, z, h, o = {}) {
+  const I = stationAssets();
+  const m = meshAt(new THREE.BoxGeometry(0.5, 0.08, 1.6), o.off ? I.panelOff : I.panel.clone(), x, h - 0.05, z, world, false);
+  let light = null;
+  if (o.light) { light = new THREE.PointLight(o.color || 0xffe8c8, o.i || 8, o.dist || 16, 1.5); light.position.set(x, h - 0.4, z); world.add(light); }
+  if (!o.off) lamps.push({ light, base: o.i || 8, mode: o.mode || 'steady', mesh: m, t: rand(0, 9) });
+}
+function deskSet(x, z, rot = 0) {
+  const I = stationAssets(), g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot; world.add(g);
+  meshAt(new THREE.BoxGeometry(1.6, 0.06, 0.8), I.desk, 0, 0.76, 0, g);
+  meshAt(new THREE.BoxGeometry(0.5, 0.72, 0.75), I.steel, 0.5, 0.37, 0, g);
+  meshAt(new THREE.BoxGeometry(0.06, 0.72, 0.75), I.steel, -0.75, 0.37, 0, g);
+  meshAt(new THREE.BoxGeometry(0.45, 0.35, 0.3), mat(0x1a1a1c), -0.2, 0.97, -0.15, g);
+  const p = meshAt(new THREE.BoxGeometry(0.3, 0.01, 0.4), I.paper, 0.3, 0.8, 0.1, g); p.rotation.y = rand(-0.5, 0.5);
+  const ch = meshAt(new THREE.BoxGeometry(0.45, 0.5, 0.45), mat(0x222428), rand(-0.3, 0.3), 0.25, 0.7, g); ch.rotation.y = rand(-0.6, 0.6);
+  const side = Math.abs(Math.sin(rot)) > 0.5; addSolid(x, z, side ? 0.8 : 1.6, side ? 1.6 : 0.8, 0.8);
+}
+function lockers(x0, x1, z, face) {
+  const I = stationAssets();
+  for (let x = x0; x < x1; x += 0.62) {
+    meshAt(new THREE.BoxGeometry(0.6, 2, 0.5), I.locker, x + 0.3, 1, z);
+    meshAt(new THREE.BoxGeometry(0.02, 0.25, 0.01), mat(0x0a0a0a), x + 0.42, 1.5, z + face * 0.26, world, false);
+  }
+  addSolid((x0 + x1) / 2, z, x1 - x0, 0.5, 2);
+}
+function cellBars(x, z0, z1, h) {
+  const I = stationAssets(), n = Math.floor((z1 - z0) / 0.22);
+  const geo = new THREE.CylinderGeometry(0.025, 0.025, h, 5), im = new THREE.InstancedMesh(geo, I.steel, n), o = new THREE.Object3D();
+  for (let i = 0; i < n; i++) { o.position.set(x, h / 2, z0 + i * 0.22); o.updateMatrix(); im.setMatrixAt(i, o.matrix); }
+  im.castShadow = true; world.add(im);
+  for (const y of [0.1, h - 0.1]) meshAt(new THREE.BoxGeometry(0.1, 0.1, z1 - z0), I.steel, x, y, (z0 + z1) / 2);
+  addSolid(x, (z0 + z1) / 2, 0.2, z1 - z0, h);
+}
+function buildStationInterior() {
+  const I = stationAssets(), C = cityAssets();
+  // lobby
+  room(-12, 12, -10, 10, 8, I.marble, { w: [[-2, 2]], e: [[-2, 2]], n: [[-2, 2]] });
+  for (const [x, z] of [[-8, -6], [8, -6], [-8, 6], [8, 6]]) { meshAt(new THREE.BoxGeometry(1, 8, 1), mat(0x6a665a), x, 4, z); addSolid(x, z, 1, 1, 8); }
+  meshAt(new THREE.BoxGeometry(8.6, 1.1, 0.6), I.desk, 0, 0.55, 1.6); addSolid(0, 1.6, 8.6, 0.6, 1.1);
+  for (const sx of [-4, 4]) { meshAt(new THREE.BoxGeometry(0.6, 1.1, 3), I.desk, sx, 0.55, 0.4); addSolid(sx, 0.4, 0.6, 3, 1.1); }
+  meshAt(new THREE.BoxGeometry(8.8, 0.06, 0.8), mat(0x2a1e14), 0, 1.13, 1.6);
+  for (const sx of [-1, 1]) { const dr = meshAt(new THREE.PlaneGeometry(1.9, 3.2), M.door, sx * 1.0, 1.6, 9.78, world, false); dr.rotation.y = Math.PI; }
+  const emb = neonSign('POLICE', '#6aa8ff', 5); emb.position.set(0, 5.8, -9.78); world.add(emb);
+  for (const [x, z, r] of [[-11, -3.5, Math.PI / 2], [11, 3.5, -Math.PI / 2]]) { const b = meshAt(new THREE.BoxGeometry(2.4, 0.45, 0.6), I.desk, x + Math.sign(x) * -0.2, 0.25, z); b.rotation.y = r; addSolid(x - Math.sign(x) * 0.2, z, 0.6, 2.4, 0.5); }
+  deskSet(-6.5, 8.6, Math.PI + 0.5); deskSet(6, 8.4, Math.PI * 0.9);
+  ceilingLight(-6, 0, 8, { light: true, i: 14, dist: 22 }); ceilingLight(6, 0, 8, { light: true, i: 14, dist: 22, mode: 'flicker' });
+  for (const z of [-7, 7]) ceilingLight(0, z, 8);
+  // west corridor -> office
+  floorCeil(-30, -12, -2, 2, 3.6, I.tile); wallLine('x', -2, -30, -12, 3.6); wallLine('x', 2, -30, -12, 3.6);
+  ceilingLight(-21, 0, 3.6, { off: true }); ceilingLight(-27, 0, 3.6);
+  room(-43, -30, -14, 14, 4, I.carpet, { e: [[-2, 2]], n: [[-38, -34]] });
+  for (const x of [-40, -36.5]) for (const z of [-9, -4, 4, 9]) deskSet(x, z, rand(-0.1, 0.1));
+  deskSet(-33, -8, Math.PI / 2 + 0.6); // knocked about
+  lockers(-42.6, -37.6, 13.45, -1); lockers(-36.2, -31, 13.45, -1);
+  for (const z of [-12, -10.6]) { meshAt(new THREE.BoxGeometry(0.6, 1.3, 0.7), I.steel, -42.4, 0.65, z); } addSolid(-42.4, -11.3, 0.6, 2.1, 1.3);
+  const wb = meshAt(new THREE.PlaneGeometry(3, 1.4), mat(0xd8d8d0), -31.5, 2, -13.78, world, false); void wb;
+  ceilingLight(-36.5, 0, 4, { light: true, i: 9, mode: 'flicker' }); ceilingLight(-36.5, -8, 4); ceilingLight(-36.5, 8, 4, { off: true });
+  // east corridor -> holding cells
+  floorCeil(12, 28, -2, 2, 3.6, I.tile); wallLine('x', -2, 12, 28, 3.6); wallLine('x', 2, 12, 28, 3.6);
+  ceilingLight(20, 0, 3.6);
+  room(28, 43, -14, 14, 4, C.walk, { w: [[-2, 2]], n: [[33, 37]] });
+  cellBars(38, -13.8, 13.8, 4);
+  for (const z of [-7, 0, 7]) { const sep = meshAt(new THREE.BoxGeometry(5, 4, 0.2), I.wall, 40.5, 2, z); void sep; addSolid(40.5, z, 5, 0.2, 4); }
+  for (const z of [-10.5, -3.5, 3.5, 10.5]) { meshAt(new THREE.BoxGeometry(1.6, 0.4, 0.7), I.steel, 41.6, 0.45, z); }
+  deskSet(31, 6, Math.PI / 2); deskSet(30.5, -9, -0.3);
+  ceilingLight(33, 0, 4, { light: true, color: 0xff3020, i: 10, mode: 'pulse' }); ceilingLight(33, -9, 4, { off: true }); ceilingLight(33, 9, 4);
+  // north corridor -> garage
+  floorCeil(-2, 2, -18, -10, 3.6, I.tile); wallLine('z', -2, -18, -10, 3.6); wallLine('z', 2, -18, -10, 3.6);
+  ceilingLight(0, -14, 3.6, { mode: 'flicker' });
+  // underground garage (boss arena)
+  room(-18, 18, -43, -18, 6, C.road, { s: [[-2, 2]], w: [[-24, -20]], e: [[-24, -20]] });
+  for (const x of [-9, 9]) for (const z of [-36, -27]) { meshAt(new THREE.BoxGeometry(1.1, 6, 1.1), mat(0x5a5a56), x, 3, z); addSolid(x, z, 1.1, 1.1, 6); }
+  for (let x = -15; x <= 15; x += 5) groundPlane(x, -40.5, 0.12, 4, C.lineW, 1, 0.02);
+  car(-13, -40, 0, 0x101418, { police: true, light: true }); car(13, -40.2, 0.05, 0x101418, { police: true }); car(-3.5, -26.5, Math.PI / 2 + 0.25, 0x6a6a64);
+  meshAt(new THREE.BoxGeometry(10, 4.5, 0.1), mat(0x5a5650, { metal: 0.5, rough: 0.5 }), 0, 2.25, -42.75, world, false);
+  ceilingLight(-6, -30, 6, { light: true, color: 0xc8e0ff, i: 12, dist: 20 }); ceilingLight(6, -36, 6, { light: true, color: 0xc8e0ff, i: 12, dist: 20, mode: 'flicker' });
+  ceilingLight(6, -24, 6); ceilingLight(-6, -38, 6, { off: true });
+  // service corridors that loop garage <-> office / cells
+  floorCeil(-38, -18, -24, -20, 3.6, I.tile); wallLine('x', -24, -38.2, -18, 3.6); wallLine('x', -20, -34, -18, 3.6); wallSeg(-38, -24, -38, -20, 3.6);
+  floorCeil(-38, -34, -20, -14, 3.6, I.tile); wallLine('z', -38, -20, -14, 3.6); wallLine('z', -34, -20, -14, 3.6);
+  floorCeil(18, 37, -24, -20, 3.6, I.tile); wallLine('x', -24, 18, 37.2, 3.6); wallLine('x', -20, 18, 33, 3.6); wallSeg(37, -24, 37, -20, 3.6);
+  floorCeil(33, 37, -20, -14, 3.6, I.tile); wallLine('z', 33, -20, -14, 3.6); wallLine('z', 37, -20, -14, 3.6);
+  ceilingLight(-28, -22, 3.6, { off: true }); ceilingLight(27, -22, 3.6, { mode: 'flicker' });
+  // clutter
+  [[-10, -8.6], [10.5, 8.5], [-28, 12], [40, 12.6], [15, -40.5], [-16.5, -19.5]].forEach(p => crate(...p));
+  [[-16, -41.5], [16.5, -30], [-41.8, -6.5]].forEach(p => redBarrel(...p));
+  for (let i = 0; i < 70; i++) { const p = meshAt(new THREE.PlaneGeometry(0.22, 0.3), I.paper, rand(-42, 42), 0.02, rand(-42, 13), world, false); p.rotation.x = -Math.PI / 2; p.rotation.z = rand(0, 6); }
+  for (let i = 0; i < 14; i++) addDecal(rand(-40, 40), rand(-40, 12), rand(0.6, 1.6));
+  stall(-11.1, 6.6, Math.PI / 2);
+}
+
 // ---- stage table ----
 const STAGES = {
   village: {
@@ -1206,11 +1371,28 @@ const STAGES = {
     ending: '夜が明ける。燃え尽きた街に、まだ動く影がある――',
   },
 };
+STAGES.station = {
+  id: 'station', build: buildCity, start: [0, -2], trader: [8.0, 11.6], goal: [0, -31.4], next: 'stationIn',
+  spawns: [[-26, -2], [26, 3], [0.5, 17], [4, 18], [-5, -19], [6.5, -19], [-24, 1.5], [22, 3]],
+  waves: [{ title: 'PROLOGUE', sub: '警察署前', atmos: 'cityFire', total: 7, conc: 7, mix: { zombie: 0.75, runner: 0.25 }, obj: '周囲を警戒しろ', prologue: true }],
+};
+STAGES.stationIn = {
+  id: 'stationIn', entry: 'station', build: buildStationInterior, start: [0, 7.5], trader: [-10.1, 4.4], flashlight: true,
+  spawns: [[-41, -11], [-41, 11], [-33, 10], [30, -12], [30, 12], [-16, -36], [15, -38], [0, -41], [-36, -22], [35, -22], [-28, 0], [26, 0]],
+  waves: [
+    { title: 'STATION 1', sub: 'ロビー', atmos: 'indoor', total: 10, conc: 5, mix: { zombie: 0.7, cop: 0.3 }, obj: '署内のゾンビを掃討しろ' },
+    { title: 'STATION 2', sub: '停電', atmos: 'indoorDark', dim: true, total: 14, conc: 6, mix: { zombie: 0.45, cop: 0.25, runner: 0.3 }, obj: '暗闇の中、ライトを頼りに戦え' },
+    { title: 'STATION 3', sub: '留置場の暴動', atmos: 'indoorRed', total: 18, conc: 8, mix: { zombie: 0.35, cop: 0.3, runner: 0.2, fat: 0.15 }, obj: '留置場から溢れ出たゾンビを止めろ' },
+    { title: 'FINAL', sub: '地下駐車場', atmos: 'indoor', total: 8, conc: 3, mix: { zombie: 0.6, runner: 0.4 }, obj: '駐車場から現れた変異体を倒せ', boss: true },
+  ],
+  boss: 'mutant', bossPos: [0, -38], bossName: '変異体 ― THE ABERRATION', bossShort: '変異体', bossBanner: 'THE ABERRATION',
+  ending: '警察署を抜け出した。だが、この街で何が起きたのか――',
+};
 let STAGE = STAGES.village;
 function clearWorld() {
   world.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   while (world.children.length) world.remove(world.children[0]);
-  solids.length = barrels.length = crates.length = fires.length = policeLights.length = 0;
+  solids.length = barrels.length = crates.length = fires.length = policeLights.length = lamps.length = 0;
   for (const d of decals) scene.remove(d); decals.length = 0;
 }
 function buildStage(id) {
@@ -1275,6 +1457,15 @@ scene.add(laser);
 const laserDot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3030, depthTest: false, transparent: true, opacity: 0.95 }));
 laserDot.renderOrder = 10; scene.add(laserDot);
 const muzzleLight = new THREE.PointLight(0xffb060, 0, 9, 2); scene.add(muzzleLight);
+const flashlight = new THREE.SpotLight(0xfff2dc, 0, 30, 0.42, 0.55, 1.3); scene.add(flashlight, flashlight.target);
+// objective marker (prologue)
+const marker = new THREE.Group(); marker.visible = false; scene.add(marker);
+{
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 7, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xffd060, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  beam.position.y = 3.5; marker.add(beam);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.9, 32), new THREE.MeshBasicMaterial({ color: 0xffd060, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; marker.add(ring);
+}
 
 // =====================================================================
 // Enemies
@@ -1797,6 +1988,8 @@ function spawnEnemy(type) {
 function startWave(i, fromContinue) {
   director.wave = i; director.phase = 'intro'; director.introT = 3.5; director.spawned = 0; director.spawnT = 1.2; director.bossDead = false; director.boss = null; director.extraSpawns = 0;
   const w = STAGE.waves[i];
+  setH('obj', w.obj);
+  director.proT = 0; director.goShown = false; director.ambushShown = false; director.dim = !!w.dim; marker.visible = false; setFade(false);
   if (!fromContinue) snapshot = { inv: JSON.parse(JSON.stringify(inv)), hp: player.hp, maxHp: player.maxHp };
   trader.hide(); setAtmos(w.atmos); showBanner(w.title, w.sub); setMusic(w.boss ? 'none' : 'combat');
   $('chap').textContent = `${w.title} ― ${w.sub}`; $('tNext').classList.add('hidden');
@@ -1816,6 +2009,21 @@ function updateDirector(dt) {
         $('bossBar').classList.remove('hidden');
       }
     }
+  } else if (director.phase === 'combat' && w.prologue) {
+    director.proT += dt;
+    if (director.spawned < w.total && alive < w.conc) { director.spawnT -= dt; if (director.spawnT <= 0) { spawnEnemy(pickType(w.mix)); director.spawned++; director.spawnT = rand(0.2, 0.6); } }
+    if (!director.goShown) setH('obj', w.obj);
+    if (director.proT > 1.2 && !director.ambushShown) { director.ambushShown = true; showBanner('AMBUSH', 'ゾンビの群れだ！'); sfx.groan(player.pos, 0.8); }
+    if (director.proT > 5 && !director.goShown) {
+      director.goShown = true; showBanner('', '警察署に入れ！'); marker.position.set(STAGE.goal[0], 0, STAGE.goal[1]); marker.visible = true;
+      setH('obj', '警察署に入れ！（光っている入口へ）'); sfx.bell();
+    }
+    if (director.goShown && Math.hypot(player.pos.x - STAGE.goal[0], player.pos.z - STAGE.goal[1]) < 2.2 && !player.dead) {
+      director.phase = 'transition'; director.transT = 0; player.invuln = 3; marker.visible = false; setFade(true);
+    }
+  } else if (director.phase === 'transition') {
+    director.transT += dt;
+    if (director.transT > 1.0) enterStage(STAGE.next);
   } else if (director.phase === 'combat') {
     const limit = w.boss ? (director.boss?.phase2 ? w.total : 2) : w.total;
     if (director.spawned < limit && alive < w.conc) {
@@ -1839,6 +2047,21 @@ function updateDirector(dt) {
   } else if (director.phase === 'ending') {
     director.introT -= dt; if (director.introT <= 0) { director.phase = 'done'; winGame(); }
   }
+}
+function setFade(on) { $('fade').classList.toggle('on', on); }
+function clearActors() {
+  for (const e of enemies) scene.remove(e.h.root); enemies.length = 0;
+  for (const p of projectiles) scene.remove(p.mesh); projectiles.length = 0;
+  for (const p of pickups) scene.remove(p.g); pickups.length = 0;
+  particlesA.clear(); particlesN.clear(); hideSlam(); hideQTE(); qte.dodgeOpen = false;
+  if (player.grabbedBy) player.grabbedBy = null;
+}
+// scene change inside one playthrough: keeps inventory and health
+function enterStage(id) {
+  clearActors(); buildStage(id);
+  player.pos.copy(START_POS); player.vel.set(0, 0, 0); player.yaw = 0; player.pitch = -0.05; player.modelYaw = Math.PI; player.invuln = 1.5;
+  startWave(0);
+  setTimeout(() => setFade(false), 350);
 }
 function nextWave() {
   if (director.phase !== 'rest') return;
@@ -2288,10 +2511,7 @@ $('sens').oninput = e => { sens = +e.target.value; };
 $('pause').addEventListener('click', e => { if (e.target.id === 'pause') resumeGame(); });
 
 function resetWorldForWave() {
-  for (const e of enemies) scene.remove(e.h.root); enemies.length = 0;
-  for (const p of projectiles) scene.remove(p.mesh); projectiles.length = 0;
-  for (const p of pickups) scene.remove(p.g); pickups.length = 0;
-  particlesA.clear(); particlesN.clear(); hideSlam(); hideQTE(); qte.dodgeOpen = false;
+  clearActors();
   player.pos.copy(START_POS); player.vel.set(0, 0, 0); player.yaw = 0; player.pitch = -0.08; player.state = 'normal'; player.dead = false;
   player.grabbedBy = null; player.reloadT = 0; player.invuln = 1; player.dodgeT = 0; ph.root.rotation.x = 0;
   $('bossBar').classList.add('hidden');
@@ -2325,7 +2545,7 @@ function winGame() {
 }
 document.querySelectorAll('.stage').forEach(b => b.onclick = () => startGame(b.dataset.stage));
 $('contBtn').onclick = continueGame;
-$('againBtn').onclick = () => { $('win').classList.add('hidden'); startGame(STAGE.id); };
+$('againBtn').onclick = () => { $('win').classList.add('hidden'); startGame(STAGE.entry || STAGE.id); };
 
 // =====================================================================
 // Player update + camera
@@ -2448,6 +2668,8 @@ function updateCamera(dt) {
   if (shakeT > 0) { shakeT -= dt; const s = shakeAmp * Math.min(1, shakeT * 4); camera.rotation.x += rand(-s, s) * 0.05; camera.rotation.y += rand(-s, s) * 0.05; camera.position.x += rand(-s, s) * 0.06; camera.position.y += rand(-s, s) * 0.06; } else shakeAmp = 0;
   camera.fov = camSmooth.fov; camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
+  flashlight.intensity = STAGE.flashlight && !p.dead ? 40 : 0;
+  flashlight.position.copy(camPivot).addScaledVector(d, 0.3); flashlight.target.position.copy(camLook);
   // sun shadow follows the player
   sun.position.copy(p.pos).addScaledVector(sunDir, 50); sun.target.position.copy(p.pos);
 }
@@ -2502,6 +2724,14 @@ function tick(dt) {
     player.stateT += dt; updatePlayer(dt); updateCamera(dt);
   }
   updateRain(dt, game.state === 'play' ? player.pos : camera.position);
+  const dimK = director.dim ? 0.1 : 1;
+  for (const l of lamps) {
+    l.t += dt; let k = 1;
+    if (l.mode === 'flicker') k = Math.random() < 0.08 ? 0.05 : (Math.sin(l.t * 31) > 0.95 ? 0.3 : 1);
+    else if (l.mode === 'pulse') k = 0.25 + 0.75 * Math.max(0, Math.sin(l.t * 3));
+    k *= dimK; if (l.light) l.light.intensity = l.base * k; l.mesh.material.emissiveIntensity = 1.2 * k;
+  }
+  if (marker.visible) { marker.children[0].material.opacity = 0.14 + Math.sin(performance.now() / 200) * 0.06; marker.rotation.y += dt; }
   for (const pl of policeLights) {
     pl.t += dt; const red = (pl.t * 2.5) % 1 < 0.5;
     pl.r.visible = red; pl.b.visible = !red;

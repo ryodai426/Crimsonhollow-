@@ -88,6 +88,8 @@ canvas#game{position:fixed;inset:0;width:100%;height:100%;display:block}
 .btn:hover{background:rgba(180,20,20,.6);color:#fff}
 .btn.small{font-size:14px;padding:8px 18px;letter-spacing:.1em;margin:0}
 .btn:disabled{opacity:.35;cursor:default;background:none}
+#fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .8s}
+#fade.on{opacity:1}
 #stageSel{display:flex;gap:14px;margin-top:24px;flex-wrap:wrap;justify-content:center}
 .stage{pointer-events:auto;cursor:pointer;width:min(280px,86vw);text-align:left;padding:12px 16px;background:rgba(40,8,6,.55);border:1px solid var(--line);color:var(--ink);font-family:inherit;transition:.15s}
 .stage:hover{border-color:var(--gold);background:rgba(120,14,10,.55)}
@@ -211,6 +213,7 @@ body.touch #hint{display:none}
   <div id="stageSel">
     <button class="stage" data-stage="village"><b>STAGE 1</b><span>赤霧の村</span><small>霧に閉ざされた山あいの村。寄生された村人と、教会に潜む処刑人。</small></button>
     <button class="stage" data-stage="city"><b>STAGE 2 <em>TEST</em></b><span>燃える街</span><small>ウイルスが漏れ出した地方都市。夜の大通りにゾンビがあふれ、警察署から変異体が現れる。</small></button>
+    <button class="stage" data-stage="station"><b>STAGE 3 <em>TEST</em></b><span>警察署</span><small>燃える街の警察署前から始まる。ゾンビの襲撃を切り抜け、署内へ逃げ込め。</small></button>
   </div>
   <div id="controls">
     <span><b>WASD</b> 移動 / <b>Shift</b> 走る</span><span><b>マウス</b> 視点</span>
@@ -221,6 +224,7 @@ body.touch #hint{display:none}
   </div>
 </div>
 
+<div id="fade"></div>
 <div id="pause" class="screen hidden">
   <h1 class="title-font" style="margin:0;letter-spacing:.3em;color:var(--gold)">PAUSE</h1>
   <button class="btn" id="resumeBtn">再開する</button>
