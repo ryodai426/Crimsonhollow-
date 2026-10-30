@@ -14,6 +14,15 @@ function angDiff(a, b) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; wh
 const dampAng = (a, b, k, dt) => a + angDiff(a, b) * (1 - Math.exp(-k * dt));
 const isTouch = matchMedia('(pointer: coarse)').matches;
 const lowQ = /[?&]low/.test(location.search);
+// graphics mode: 'psx' (PlayStation-style, default) or 'hd'
+let gfxPref = null; try { gfxPref = localStorage.getItem('ch-gfx'); } catch (e) { /* storage blocked */ }
+const PSX = gfxPref !== 'hd';
+if (PSX) {
+  document.body.classList.add('psx');
+  // snap vertices to a coarse screen grid (the wobbly PS1 polygons); skipped for shadow depth passes
+  THREE.ShaderChunk.project_vertex = THREE.ShaderChunk.project_vertex.replace('gl_Position = projectionMatrix * mvPosition;',
+    'gl_Position = projectionMatrix * mvPosition;\n#ifndef DEPTH_PACKING\n{ vec2 g = vec2(160.0, 120.0); gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g + 0.5) / g * gl_Position.w; }\n#endif');
+}
 if (isTouch) document.body.classList.add('touch');
 
 const BOUND = 44;
@@ -22,11 +31,11 @@ const BOUND = 44;
 // Renderer / scene
 // =====================================================================
 const canvas = $('game');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch, powerPreference: 'high-performance' });
-renderer.setPixelRatio(lowQ ? 0.6 : Math.min(window.devicePixelRatio, isTouch ? 1.5 : 1.75));
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch && !PSX, powerPreference: 'high-performance' });
+renderer.setPixelRatio(PSX ? 1 : lowQ ? 0.6 : Math.min(window.devicePixelRatio, isTouch ? 1.5 : 1.75));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = !lowQ;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = PSX ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -34,10 +43,32 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 260);
 scene.fog = new THREE.FogExp2(0x4a3020, 0.024);
 
+// PS1 mode renders the scene at 240 lines into a target, then upscales it with 15-bit colour + ordered dithering
+const PSX_H = 240;
+const psxSize = () => [Math.round(PSX_H * innerWidth / innerHeight), PSX_H];
+const psxRT = new THREE.WebGLRenderTarget(...psxSize(), { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+const postScene = new THREE.Scene(), postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const postMat = new THREE.ShaderMaterial({
+  uniforms: { tDiffuse: { value: psxRT.texture }, res: { value: new THREE.Vector2(...psxSize()) } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform vec2 res; varying vec2 vUv;
+    const float B[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
+    void main(){
+      vec2 px = floor(vUv * res);
+      gl_FragColor = vec4(texture2D(tDiffuse, (px + .5) / res).rgb, 1.);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+      vec2 q = mod(px, 4.); float d = B[int(q.x) + int(q.y) * 4] / 16. - .5;
+      gl_FragColor.rgb = floor(clamp(gl_FragColor.rgb, 0., 1.) * 31. + .5 + d) / 31.;
+    }`,
+  depthTest: false, depthWrite: false,
+});
+postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  particlesN.mat.uniforms.scale.value = particlesA.mat.uniforms.scale.value = innerHeight / 2;
+  psxRT.setSize(...psxSize()); postMat.uniforms.res.value.set(...psxSize());
+  particlesN.mat.uniforms.scale.value = particlesA.mat.uniforms.scale.value = PSX ? PSX_H / 2 : innerHeight / 2;
 });
 
 // sky dome
@@ -88,7 +119,7 @@ function setAtmos(name, instant) {
 }
 function applyAtmos(v) {
   skyUni.top.value.copy(v.sky[0]); skyUni.mid.value.copy(v.sky[1]); skyUni.bot.value.copy(v.sky[2]);
-  scene.fog.color.copy(v.fog); scene.fog.density = v.dens;
+  scene.fog.color.copy(v.fog); scene.fog.density = v.dens * (PSX ? 1.35 : 1);
   hemi.color.copy(v.hs); hemi.groundColor.copy(v.hg); hemi.intensity = v.hi;
   sun.color.copy(v.sc); sun.intensity = v.si; sunDir.copy(v.dir);
   renderer.toneMappingExposure = v.exp;
@@ -114,7 +145,8 @@ function canvasTex(size, draw, rx = 1, ry = rx) {
   const g = c.getContext('2d'); draw(g, size);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry);
-  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = PSX ? 1 : renderer.capabilities.getMaxAnisotropy();
+  if (PSX) { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestMipmapNearestFilter; }
   return t;
 }
 function speckle(g, s, n, cols, r0, r1, a0 = 0.2, a1 = 0.6) {
@@ -568,10 +600,10 @@ class Particles {
     g.setAttribute('palpha', new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
     this.geo = g;
     this.mat = new THREE.ShaderMaterial({
-      uniforms: { scale: { value: innerHeight / 2 } }, transparent: true, depthWrite: false, blending,
+      uniforms: { scale: { value: PSX ? PSX_H / 2 : innerHeight / 2 } }, defines: PSX ? { LINEARIZE: '' } : {}, transparent: true, depthWrite: false, blending,
       vertexShader: `attribute vec3 pcolor; attribute float psize; attribute float palpha; uniform float scale; varying vec3 vC; varying float vA;
         void main(){ vC = pcolor; vA = palpha; vec4 mv = modelViewMatrix * vec4(position, 1.); gl_PointSize = psize * scale / max(.1, -mv.z); gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `varying vec3 vC; varying float vA; void main(){ vec2 c = gl_PointCoord - .5; float d = length(c); if (d > .5) discard; gl_FragColor = vec4(vC, vA * smoothstep(.5, .1, d)); }`,
+      fragmentShader: `varying vec3 vC; varying float vA; void main(){ vec2 c = gl_PointCoord - .5; float d = length(c); if (d > .5) discard; vec3 col = vC;\n#ifdef LINEARIZE\ncol = pow(col, vec3(2.2));\n#endif\ngl_FragColor = vec4(col, vA * step(d, .42)); }`,
     });
     this.points = new THREE.Points(g, this.mat); this.points.frustumCulled = false; scene.add(this.points);
   }
@@ -1012,7 +1044,7 @@ function cityAssets() {
       }
     }
     const map = new THREE.CanvasTexture(c1), emi = new THREE.CanvasTexture(c2);
-    for (const t of [map, emi]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; }
+    for (const t of [map, emi]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = PSX ? 1 : 8; if (PSX) t.magFilter = THREE.NearestFilter; }
     return new THREE.MeshStandardMaterial({ map, emissiveMap: emi, emissive: 0xffffff, emissiveIntensity: 1.1, roughness: 0.9 });
   };
   const stripes = canvasTex(128, (g, s) => { g.fillStyle = '#e0dcd0'; g.fillRect(0, 0, s, s); g.fillStyle = '#e05a10'; for (let i = -s; i < s * 2; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 16, 0); g.lineTo(i + 16 - s, s); g.lineTo(i - s, s); g.fill(); } });
@@ -1452,7 +1484,7 @@ const knifeMesh = part(ph.armL.hand, 0.02, 0.25, 0.04, mat(0xb0b0b8, { metal: 0.
 
 // laser sight
 const laserMat = new THREE.MeshBasicMaterial({ color: 0xff1a1a, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
-const laser = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 1, 4, 1, true), laserMat); laser.geometry.translate(0, 0.5, 0); laser.geometry.rotateX(Math.PI / 2);
+const laser = new THREE.Mesh(new THREE.CylinderGeometry(PSX ? 0.014 : 0.006, PSX ? 0.014 : 0.006, 1, 4, 1, true), laserMat); laser.geometry.translate(0, 0.5, 0); laser.geometry.rotateX(Math.PI / 2);
 scene.add(laser);
 const laserDot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3030, depthTest: false, transparent: true, opacity: 0.95 }));
 laserDot.renderOrder = 10; scene.add(laserDot);
@@ -2543,6 +2575,8 @@ function winGame() {
   $('winStats').innerHTML = `<div id="rank">${rank}</div>クリアタイム ${mins}分${String(secs).padStart(2, '0')}秒<br>撃破数 ${stats.kills}　命中率 ${acc}%　ヘッドショット ${stats.heads}<br>コンティニュー ${stats.deaths}回<br><span style="color:var(--dim);font-size:14px">${STAGE.ending}</span>`;
   $('win').classList.remove('hidden'); $('hud').classList.add('hidden'); $('touch').classList.add('hidden');
 }
+$('gfxBtn').textContent = PSX ? 'グラフィック：PS1風（クリックで高画質に）' : 'グラフィック：高画質（クリックでPS1風に）';
+$('gfxBtn').onclick = () => { try { localStorage.setItem('ch-gfx', PSX ? 'hd' : 'psx'); } catch (e) { /* storage blocked */ } location.reload(); };
 document.querySelectorAll('.stage').forEach(b => b.onclick = () => startGame(b.dataset.stage));
 $('contBtn').onclick = continueGame;
 $('againBtn').onclick = () => { $('win').classList.add('hidden'); startGame(STAGE.entry || STAGE.id); };
@@ -2702,7 +2736,8 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   tick(dt);
-  renderer.render(scene, camera);
+  if (PSX) { renderer.setRenderTarget(psxRT); renderer.render(scene, camera); renderer.setRenderTarget(null); renderer.render(postScene, postCam); }
+  else renderer.render(scene, camera);
 }
 function tick(dt) {
   updateAtmos(dt);
