@@ -992,6 +992,8 @@ function block(parent, wt, wb, h, d, m, x, y, z) {
   me.rotation.y = Math.PI / 4; me.scale.set(1, 1, 1); me.position.set(x, y, z); me.castShadow = true;
   const g = new THREE.Group(); g.scale.z = d / Math.max(wt, wb); g.position.set(0, 0, 0); g.add(me); parent.add(g); return me;
 }
+function jointGeo(r) { const k = `j${r}`; if (!geoCache.has(k)) geoCache.set(k, new THREE.SphereGeometry(r, 6, 4)); return geoCache.get(k); }
+function joint(parent, r, m, y = 0) { const me = new THREE.Mesh(jointGeo(+r.toFixed(3)), m); me.position.y = y; me.castShadow = true; parent.add(me); return me; }
 function boxGeo(w, h, d) { const k = `${w}|${h}|${d}`; if (!geoCache.has(k)) geoCache.set(k, new THREE.BoxGeometry(w, h, d)); return geoCache.get(k); }
 function part(parent, w, h, d, m, x, y, z) { const me = new THREE.Mesh(boxGeo(w, h, d), m); me.position.set(x, y, z); me.castShadow = true; parent.add(me); return me; }
 function grp(parent, x, y, z) { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); return g; }
@@ -1034,16 +1036,20 @@ function makeHumanoid(c) {
     limb(sh, 0.07 * bw, 0.056 * bw, 0.32, c.sleeve || c.shirt, 0, -0.15, 0);
     { const dl = new THREE.Mesh(new THREE.SphereGeometry(0.078 * bw, 6, 4), c.sleeve || c.shirt); dl.position.y = -0.02; dl.castShadow = true; sh.add(dl); }
     const el = grp(sh, 0, -0.31, 0);
+    joint(el, 0.056 * bw, c.forearm || c.sleeve || c.shirt);
     limb(el, 0.058 * bw, 0.046 * bw, 0.28, c.forearm || c.sleeve || c.shirt, 0, -0.13, 0);
     const hand = grp(el, 0, -0.3, 0);
+    joint(hand, 0.042 * bw, c.glove || c.skin, 0.04);
     part(hand, 0.09, 0.1, 0.1, c.glove || c.skin, 0, 0, 0);
     part(hand, 0.03, 0.06, 0.035, c.glove || c.skin, side * -0.05, -0.02, 0.04);
     return { sh, el, hand };
   };
   const leg = side => {
     const hip = grp(hips, side * 0.1 * bw, -0.06, 0);
+    joint(hip, 0.092 * bw, c.pants);
     limb(hip, 0.092 * bw, 0.07 * bw, 0.46, c.pants, 0, -0.22, 0);
     const knee = grp(hip, 0, -0.45, 0);
+    joint(knee, 0.072 * bw, c.boots || c.pants);
     limb(knee, 0.072 * bw, 0.058 * bw, 0.44, c.boots || c.pants, 0, -0.21, 0);
     part(knee, 0.1, 0.07, 0.07, c.boots || mat(0x1a1410), 0, -0.42, -0.08);
     part(knee, 0.15, 0.08, 0.27, c.boots || mat(0x1a1410), 0, -0.44, 0.05);
@@ -1067,11 +1073,19 @@ function applyPose(h, p, dt, k = 14) {
   h.torso.rotation.set(c.tx, c.ty, c.tz); h.head.rotation.set(c.hx, c.hy, c.hz);
   h.hips.position.y = 0.95 + c.py; h.root.rotation.x = c.rx;
 }
+// turn the head (and a little of the upper body) toward a point in the world
+function lookAt(p, face, from, to, headY, k = 1) {
+  const dx = to.x - from.x, dz = to.z - from.z;
+  const yaw = clamp(angDiff(face, Math.atan2(dx, dz)), -1.1, 1.1) * k;
+  p.hy = (p.hy || 0) + yaw * 0.75; p.ty = (p.ty || 0) + yaw * 0.25;
+  p.hx = (p.hx || 0) - clamp(Math.atan2(to.y - headY, Math.hypot(dx, dz) + 0.01), -0.6, 0.6) * k;
+}
 function walkPose(p, phase, amp) {
   const s = Math.sin(phase), c2 = Math.cos(phase);
   p.lhx = s * 0.65 * amp; p.rhx = -s * 0.65 * amp;
   p.lkx = Math.max(0, -c2) * 0.9 * amp + 0.05; p.rkx = Math.max(0, c2) * 0.9 * amp + 0.05;
   p.lsx = (p.lsx || 0) - s * 0.5 * amp; p.rsx = (p.rsx || 0) + s * 0.5 * amp;
+  p.lex = (p.lex || 0) - (0.25 + Math.max(0, s) * 0.55) * amp; p.rex = (p.rex || 0) - (0.25 + Math.max(0, -s) * 0.55) * amp;
   p.py = -Math.abs(Math.sin(phase)) * 0.04 * amp;
   return p;
 }
@@ -1928,6 +1942,8 @@ class Enemy {
       const t = clamp(this.st / 0.7, 0, 1); p.rx = -Math.PI / 2 * (1 - t); p.tx = 0.6 * (1 - t); p.lkx = 1.2 * (1 - t); p.rkx = 1.2 * (1 - t); p.py = -0.3 * (1 - t);
     } else if (s === 'emerge') { p.tx = 0.2 + Math.sin(this.st * 14) * 0.15; p.lsx = 0.2; p.rsx = 0.2; p.tz = Math.sin(this.st * 11) * 0.2; }
     else if (s === 'stunned') { p.tx = 0.5; p.hx = 0.4; p.lsx = 0.2; p.rsx = 0.2; p.lkx = 0.4; p.rkx = 0.4; p.py = -0.1; }
+    if (!this.isParasite && !player.dead && ['chase', 'windup', 'recover', 'throwWind', 'grabWind', 'grabbing', 'flinch', 'getup'].includes(s))
+      lookAt(p, this.face, this.pos, _lk.set(player.pos.x, 1.55, player.pos.z), 1.7 * this.scale, s === 'getup' ? 0.4 : 1);
     applyPose(h, p, dt, s === 'strike' ? 30 : s === 'down' || s === 'dying' ? 30 : 12);
     if (this.isParasite) { h.parasite.children.forEach((seg, i) => { seg.rotation.x = Math.sin(this.st * 6 + i) * 0.8; seg.rotation.z = Math.cos(this.st * 5 + i * 2) * 0.6; }); }
     if (h.weapon.userData.flame) { const f = h.weapon.userData.flame; f.scale.setScalar(0.8 + Math.random() * 0.5); if (Math.random() < 0.3) particlesA.add(this.hb.hips.x, this.hb.neck.y + 0.4, this.hb.hips.z, rand(-.2, .2), 1.2, rand(-.2, .2), 0.4, 0.15, 0.05, 1, 0.5, 0.15, 1, -1, 1, false); }
@@ -2010,13 +2026,14 @@ class Enemy {
     if (this.state === 'chase' || this.state === 'intro') { this.face = dampAng(this.face, this.state === 'intro' ? 0 : toFace, 4, dt); walkPose(p, this.phase, clamp(sp / 1.6, 0, 1)); p.rsx = (p.rsx || 0) - 0.3; p.tx = (p.tx || 0) + 0.15; }
     this.phase += sp * dt * 2.2;
     if (this.state !== 'charge' && sp > 0.5 && Math.floor(this.phase / Math.PI) !== Math.floor((this.phase - sp * dt * 2.2) / Math.PI)) { shake(0.06, 0.15); }
+    if (!player.dead && this.state !== 'kneel' && this.state !== 'stun' && this.state !== 'kicked') lookAt(p, this.face, this.pos, _lk.set(player.pos.x, 1.55, player.pos.z), 1.7 * this.scale, 0.8);
     applyPose(h, p, dt, this.state === 'swing' || this.state === 'slam' ? 28 : 10);
     h.root.position.x = this.pos.x; h.root.position.z = this.pos.z; h.root.rotation.y = this.face;
     h.core.material.color.setHSL(this.t.coreHue, 1, 0.5 + Math.sin(performance.now() / 120) * 0.15);
     this.updateHB();
   }
 }
-const _a = new V3(), _b = new V3(), _c = new V3();
+const _a = new V3(), _b = new V3(), _c = new V3(), _lk = new V3();
 const CHANTS = ['「ヴァル・セーナ！」', '「クォ・ダレム…」', '「ムエ・ラ・カーサ！」', '「オルド…オルド…」', '「セナ・ディール！」'];
 
 // boss slam telegraph
@@ -2169,7 +2186,9 @@ const trader = (() => {
       if (!this.visible) return; this.t += dt;
       const face = Math.atan2(player.pos.x - TRADER_POS.x, player.pos.z - TRADER_POS.z);
       h.root.rotation.y = dampAng(h.root.rotation.y, face, 3, dt);
-      applyPose(h, { ...pose, hy: Math.sin(this.t * 0.7) * 0.2, ty: Math.sin(this.t * 0.4) * 0.08 }, dt, 4);
+      const tp = { ...pose, hy: Math.sin(this.t * 0.7) * 0.1, ty: Math.sin(this.t * 0.4) * 0.05 };
+      lookAt(tp, h.root.rotation.y, TRADER_POS, _lk.set(player.pos.x, 1.6, player.pos.z), 1.8);
+      applyPose(h, tp, dt, 4);
       light.intensity = 4.5 + Math.sin(this.t * 7) * 0.4 + Math.random() * 0.3;
     },
   };
@@ -2839,10 +2858,11 @@ function updatePlayer(dt) {
   } else {
     Object.assign(pose, twoHand ? { rsx: -0.6, rex: -0.8, lsx: -0.9, lsz: -0.4, lex: -1.1, tx: 0.08 } : { rsx: -0.25, rex: -0.35, lsx: 0, tx: 0.05 });
     walkPose(pose, p.phase, clamp(sp / 3, 0, run ? 1.25 : 1));
-    if (twoHand) { pose.lsx = -0.9; pose.rsx = -0.6; }
+    if (twoHand) { pose.lsx = -0.9; pose.rsx = -0.6; pose.lex = -1.1; pose.rex = -0.8; }
     if (p.reloadT > 0) { pose.lsx = -1.3; pose.lex = -1.2; pose.rsx = -1.0; pose.rex = -0.9; pose.hx = 0.35; }
     if (run) pose.tx = 0.22;
   }
+  if (p.aim <= 0.05 && p.state === 'normal' && !p.grabbedBy) pose.hx = (pose.hx || 0) - clamp(p.pitch, -0.6, 0.5) * 0.6;
   if (p.hurtT > 0) { pose.tx = (pose.tx || 0) - 0.3; pose.hx = (pose.hx || 0) - 0.3; }
   applyPose(ph, pose, dt, p.state === 'kick' ? 30 : 16);
   knifeMesh.visible = p.state === 'knife';
