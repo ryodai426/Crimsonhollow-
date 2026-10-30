@@ -850,9 +850,15 @@ function makeHumanoid(c) {
   part(torso, 0.44 * bw, 0.58, 0.26 * Math.sqrt(bw), c.shirt, 0, 0.3, 0);
   if (c.vest) part(torso, 0.46 * bw, 0.4, 0.28, c.vest, 0, 0.32, 0);
   if (c.apron) part(torso, 0.4 * bw, 0.75, 0.04, c.apron, 0, 0.12, 0.15);
+  // finer details: collar, belt, neck
+  part(torso, 0.3 * bw, 0.06, 0.2, c.vest || c.shirt, 0, 0.6, 0);
+  part(hips, 0.38 * bw, 0.06, 0.24, c.belt || mat(0x1a1410), 0, 0.09, 0);
   const neck = grp(torso, 0, 0.62, 0);
+  if (!c.mask && !c.hood) part(neck, 0.11, 0.08, 0.11, c.skin, 0, 0.0, 0);
   const head = grp(neck, 0, 0.13, 0);
   const headMesh = part(head, 0.24, 0.27, 0.25, c.skin, 0, 0, 0);
+  if (!c.mask) part(head, 0.045, 0.07, 0.05, c.skin, 0, -0.02, 0.135);
+  if (!c.mask && !c.hood && !c.scarf) for (const ex of [-0.125, 0.125]) part(head, 0.03, 0.07, 0.05, c.skin, ex, 0.0, 0.0);
   if (c.hair) part(head, 0.26, 0.08, 0.27, c.hair, 0, 0.14, -0.01);
   if (c.hairBack) part(head, 0.26, 0.2, 0.08, c.hair, 0, 0.04, -0.12);
   if (c.cap) { part(head, 0.28, 0.07, 0.29, c.cap, 0, 0.15, 0); part(head, 0.26, 0.03, 0.12, c.cap, 0, 0.12, 0.17); }
@@ -872,6 +878,7 @@ function makeHumanoid(c) {
     part(el, 0.11 * bw, 0.28, 0.11 * bw, c.forearm || c.sleeve || c.shirt, 0, -0.13, 0);
     const hand = grp(el, 0, -0.3, 0);
     part(hand, 0.09, 0.1, 0.1, c.glove || c.skin, 0, 0, 0);
+    part(hand, 0.03, 0.06, 0.035, c.glove || c.skin, side * -0.05, -0.02, 0.04);
     return { sh, el, hand };
   };
   const leg = side => {
@@ -880,6 +887,7 @@ function makeHumanoid(c) {
     const knee = grp(hip, 0, -0.45, 0);
     part(knee, 0.14 * bw, 0.44, 0.15, c.boots || c.pants, 0, -0.21, 0);
     part(knee, 0.15, 0.08, 0.27, c.boots || mat(0x1a1410), 0, -0.44, 0.05);
+    part(knee, 0.13, 0.06, 0.08, c.boots || mat(0x1a1410), 0, -0.43, 0.2);
     const foot = grp(knee, 0, -0.46, 0);
     return { hip, knee, foot };
   };
@@ -1559,13 +1567,25 @@ function makeVillager(type) {
   if (t.zombie && Math.random() < 0.7) { const st = new THREE.Mesh(boxGeo(0.2, 0.22, 0.01), mat(0x3a0606, { rough: 0.4 })); st.position.set(rand(-0.1, 0.1), rand(0.15, 0.4), 0.135); h.torso.add(st); }
   if (type === 'mutant') {
     h.armR.sh.scale.set(1.7, 1.3, 1.7);
-    for (let i = 0; i < 6; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(rand(0.06, 0.12), 7, 5), parasiteMat); b.position.set(rand(-0.25, 0.1), rand(0.3, 0.6), rand(-0.1, 0.15)); h.torso.add(b); }
+    for (let i = 0; i < 6; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(rand(0.06, 0.12), 10, 7), parasiteMat); b.position.set(rand(-0.25, 0.1), rand(0.3, 0.6), rand(-0.1, 0.15)); h.torso.add(b); }
+    for (let i = 0; i < 4; i++) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.18, 6), mat(0xd8c8a0, { rough: 0.4 })); sp.position.set(-0.05 + rand(-0.12, 0.12), 0.25 + i * 0.1, -0.15); sp.rotation.x = -1.2; h.torso.add(sp); }
+    for (const y of [-0.05, -0.15]) part(h.armR.sh, 0.16, 0.05, 0.16, mat(0x5a3040), 0, y, 0);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffe060 })); eye.position.set(-0.28, 0.55, 0.08); h.torso.add(eye);
   }
   if (t.boss) {
     const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffaa30 }));
     core.position.set(0, 0.35, -0.16); h.torso.add(core); h.core = core;
     part(h.torso, 0.08, 0.08, 0.2, M.metal, 0.12, 0.55, -0.14); part(h.torso, 0.08, 0.08, 0.2, M.metal, -0.12, 0.55, -0.14);
+    if (type === 'boss') {
+      // iron pauldrons with spikes, chain across the chest, pouches on the belt
+      for (const side of [1, -1]) {
+        const sh = side > 0 ? h.armL.sh : h.armR.sh;
+        part(sh, 0.2, 0.08, 0.2, M.metal, 0, 0.02, 0); part(sh, 0.17, 0.06, 0.17, M.metal, 0, 0.08, 0);
+        for (const sz of [-0.06, 0.06]) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.1, 6), M.metal); sp.position.set(0, 0.15, sz); sp.castShadow = true; sh.add(sp); }
+      }
+      for (let i = 0; i < 6; i++) { const l = part(h.torso, 0.04, 0.06, 0.02, M.metal, -0.18 + i * 0.07, 0.5 - i * 0.07, 0.15); l.rotation.z = 0.8; }
+      for (const x of [-0.14, 0.14]) part(h.hips, 0.09, 0.1, 0.06, mat(0x3a2418), x, 0.0, 0.14);
+    }
   }
   return h;
 }
@@ -2794,4 +2814,4 @@ buildStage('village');
 requestAnimationFrame(frame);
 
 // debug handle for automated testing
-window.__game = { get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
+window.__game = { playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
