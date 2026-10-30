@@ -72,15 +72,17 @@ function fit() {
   document.body.classList.toggle('portrait', portrait);
   document.body.classList.toggle('landscape', !portrait);
   if (isTouch) {
-    // phones: fill the whole screen for legibility; the short side gets 240 PS1 lines
-    viewW = vw; viewH = vh;
-    const sc = PSX_H / Math.min(vw, vh); psxW = Math.round(vw * sc); psxH = Math.round(vh * sc);
-    $('screen').style.width = vw + 'px'; $('screen').style.height = vh + 'px'; $('tv').style.marginTop = '';
-    root.setProperty('--k', clamp(Math.min(vw, vh) / 520, 0.75, 1.1).toFixed(3));
-    fovMul = clamp(1.25 / (vw / vh), 1, 1.75); // widen the view on tall screens
+    // phones: fixed 9:16 (portrait) / 16:9 (landscape) screen, letterboxed; the short side gets 240 PS1 lines
+    const ar = portrait ? 9 / 16 : 16 / 9;
+    const w = Math.floor(Math.min(vw, vh * ar)), h = Math.floor(w / ar);
+    viewW = w; viewH = h;
+    const sc = PSX_H / Math.min(w, h); psxW = Math.round(w * sc); psxH = Math.round(h * sc);
+    $('screen').style.width = w + 'px'; $('screen').style.height = h + 'px'; $('tv').style.marginTop = '';
+    root.setProperty('--k', clamp(Math.min(w, h) / 520, 0.72, 1.1).toFixed(3));
+    fovMul = clamp(1.25 / ar, 1, 1.75); // widen the view on the tall portrait screen
   } else { psxW = 320; psxH = PSX_H; fovMul = 1; }
   psxRT.setSize(psxW, psxH); postMat.uniforms.res.value.set(psxW, psxH); ptScale.value = psxH / 2;
-  if (isTouch) { renderer.setSize(vw, vh, false); camera.aspect = vw / vh; camera.updateProjectionMatrix(); return; }
+  if (isTouch) { renderer.setSize(viewW, viewH, false); camera.aspect = viewW / viewH; camera.updateProjectionMatrix(); return; }
   const bez = Math.round(clamp(Math.min(vw, vh) * (isTouch ? 0.025 : 0.035), 8, 30));
   const margin = isTouch ? 6 : 14;
   const w = Math.floor(Math.min(vw - 2 * (margin + bez), (vh - 2 * (margin + bez)) * 4 / 3)), h = Math.floor(w * 3 / 4);
