@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
   const b = await chromium.launch({ args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
   const p = await b.newPage({ viewport: { width: 480, height: 270 } });
   const errs=[]; p.on('pageerror', e => errs.push('PAGEERR: ' + e.message + e.stack));
-  await p.goto('http://localhost:8766/?low&' + Date.now()); await p.waitForTimeout(800); await p.click('.stage[data-stage="village"]');
+  await p.goto('http://localhost:8766/?low&' + Date.now()); await p.waitForTimeout(800); await p.click('.stage[data-stage="village"]'); await p.keyboard.press('Enter'); // skip the opening movie
   const out = await p.evaluate(() => {
     const g = window.__game, P = g.player; const log=[]; const seen=new Set();
     g.inv.owned.sg = true; g.inv.ammo.sg = 999; g.inv.ammo.hg = 999; g.inv.mag.sg = 6;

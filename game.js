@@ -3215,6 +3215,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Tab') e.preventDefault();
   if (game.state === 'case') { if (e.code === 'Tab' || e.code === 'Escape') closeCase(); return; }
   if (game.state === 'shop') { if (e.code === 'KeyE' || e.code === 'Escape') closeShop(); return; }
+  if (game.state === 'cine') { if (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape') endMovie(); return; }
   if (game.state !== 'play') return;
   if (keys[e.code]) return; keys[e.code] = true;
   switch (e.code) {
@@ -3548,7 +3549,8 @@ function winGame() {
   $('winStats').innerHTML = `<div id="rank">${rank}</div>クリアタイム ${mins}分${String(secs).padStart(2, '0')}秒<br>撃破数 ${stats.kills}　命中率 ${acc}%　ヘッドショット ${stats.heads}<br>コンティニュー ${stats.deaths}回<br><span style="color:var(--dim);font-size:14px">${STAGE.ending}</span>`;
   $('win').classList.remove('hidden'); $('hud').classList.add('hidden'); $('touch').classList.add('hidden');
 }
-document.querySelectorAll('.stage').forEach(b => b.onclick = () => startGame(b.dataset.stage));
+// STAGE 1 opens with its movie (skippable)
+document.querySelectorAll('.stage').forEach(b => b.onclick = () => b.dataset.stage === 'village' ? playMovie('stage1', () => startGame('village')) : startGame(b.dataset.stage));
 $('contBtn').onclick = continueGame;
 $('againBtn').onclick = () => { $('win').classList.add('hidden'); startGame(STAGE.entry || STAGE.id); };
 
@@ -3707,12 +3709,226 @@ function updateLaser() {
 // Main loop
 // =====================================================================
 let last = performance.now();
+// =====================================================================
+// Cutscenes: real-time movies rendered with the game's own PS1 pipeline
+// =====================================================================
+// A movie is a list of cuts on one clock. Everything on screen is computed from the movie time, so a movie can be
+// sought to any moment (the tests take stills that way). Subtitles and fades run on the same clock.
+const cineScene = new THREE.Scene();
+cineScene.fog = new THREE.FogExp2(0x7a828a, 0.04); cineScene.background = new THREE.Color(0x7a828a);
+const cineCam = new THREE.PerspectiveCamera(50, 4 / 3, 0.05, 300);
+cineScene.add(new THREE.HemisphereLight(0xc8d2dc, 0x3a3a34, 1.1));
+{ const sun = new THREE.DirectionalLight(0xe6eef6, 1.3); sun.position.set(-4, 10, 6); cineScene.add(sun); }
+const easeIO = t => t * t * (3 - 2 * t);
+const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+const cine = { movie: null, t: 0, onEnd: null, paused: false, built: false };
+
+// ---- props ----
+function makeHeli() {
+  const g = new THREE.Group(), body = mat(0x1c2834, { metal: 0.4, rough: 0.5 }), dark = mat(0x0c1014, { metal: 0.5, rough: 0.35 }), stripe = mat(0xb8b0a0, { rough: 0.6 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x0a1218, roughness: 0.1, metalness: 0.8, emissive: 0x1e2e3a, emissiveIntensity: 0.6 });
+  part(g, 2.0, 1.7, 3.6, body, 0, 1.25, 0);          // cabin (nose toward +z)
+  part(g, 1.9, 1.25, 1.3, body, 0, 1.1, 2.3);        // nose
+  part(g, 1.5, 0.85, 0.5, body, 0, 0.92, 3.1);
+  for (const sx of [-0.48, 0.48]) { const w = part(g, 0.86, 0.8, 0.05, glass, sx, 1.62, 2.86); w.rotation.x = -0.5; }
+  part(g, 1.4, 0.42, 0.05, glass, 0, 0.85, 3.36);
+  for (const sx of [-1, 1]) { part(g, 0.04, 0.6, 1.2, glass, sx * 1.01, 1.55, 0.7); part(g, 0.04, 0.12, 3.4, stripe, sx * 1.01, 0.92, 0.4); }
+  part(g, 1.4, 0.5, 2.2, body, 0, 2.3, -0.3); part(g, 0.25, 0.4, 0.25, dark, 0, 2.7, 0);
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.45, 5, 8), body); boom.rotation.x = Math.PI / 2; boom.position.set(0, 1.6, -4.2); g.add(boom);
+  part(g, 0.12, 1.4, 0.9, body, 0, 2.15, -6.6); part(g, 1.6, 0.08, 0.5, body, 0, 1.6, -6.1);
+  const tail = grp(g, 0.2, 2.2, -6.7); for (let i = 0; i < 2; i++) { const b = part(tail, 0.03, 1.2, 0.12, dark, 0, 0, 0); b.rotation.x = i * Math.PI / 2; }
+  for (const sx of [-0.95, 0.95]) { part(g, 0.08, 0.08, 4.2, dark, sx, 0.05, 0.7); for (const z of [-0.5, 1.7]) part(g, 0.06, 0.45, 0.06, dark, sx * 0.92, 0.3, z); }
+  const rotor = grp(g, 0, 2.95, 0);
+  for (let i = 0; i < 4; i++) { const arm = grp(rotor, 0, 0, 0); arm.rotation.y = i * Math.PI / 2; part(arm, 0.32, 0.04, 5.4, dark, 0, 0, 2.7); }
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(5.4, 24), new THREE.MeshBasicMaterial({ color: 0x1a2028, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }));
+  disc.rotation.x = -Math.PI / 2; rotor.add(disc);
+  const beacon = new THREE.Mesh(boxGeo(0.14, 0.1, 0.14), new THREE.MeshBasicMaterial({ color: 0xff2010 })); beacon.position.set(0, 2.6, -1.2); g.add(beacon);
+  const lampM = new THREE.MeshBasicMaterial({ color: 0xfff6dc });
+  for (const sx of [-0.35, 0.35]) { const l = new THREE.Mesh(new THREE.CircleGeometry(0.12, 10), lampM); l.position.set(sx, 0.55, 3.0); g.add(l); }
+  return { g, rotor, tail, beacon };
+}
+function pilotLook(suit) {
+  return { shirt: mat(suit), sleeve: mat(suit), pants: mat(suit), vest: mat(0x2a2e26), skin: mat(pick([0xc9a07e, 0xb08a6a])), glove: mat(0x141414), boots: mat(0x1a1612), belt: mat(0x1a1a18) };
+}
+function addHelmet(h) {
+  const hm = mat(0x3a4030, { rough: 0.5 }), dk = mat(0x101214, { metal: 0.6, rough: 0.2 });
+  part(h.head, 0.31, 0.24, 0.32, hm, 0, 0.08, -0.01); part(h.head, 0.27, 0.09, 0.04, dk, 0, 0.13, 0.16);
+  part(h.head, 0.05, 0.12, 0.08, hm, 0.15, -0.02, 0.02); part(h.head, 0.02, 0.02, 0.16, dk, 0.14, -0.07, 0.1);
+}
+// seated pose (thighs level on a 0.45 m seat)
+const SEAT = () => ({ lhx: -1.5, rhx: -1.5, lkx: 1.5, rkx: 1.5, py: -0.35 });
+function setPose(h, p) { applyPose(h, p, 1, 60); }
+
+function buildCine() {
+  if (cine.built) return; cine.built = true;
+  // ---- exterior: clouds and the helicopter coming out of them ----
+  const ext = new THREE.Group(); cineScene.add(ext); cine.ext = ext;
+  const cloudTex = canvasTex(128, (g) => { for (let i = 0; i < 14; i++) { const x = rand(30, 98), y = rand(36, 92), r = rand(16, 32), gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(236,239,243,.6)'); gr.addColorStop(1, 'rgba(236,239,243,0)'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); } });
+  cine.clouds = [];
+  for (let i = 0; i < 70; i++) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, color: pick([0xdfe4ea, 0xc8ced6, 0xb4bcc6]), transparent: true, opacity: rand(0.5, 0.95), depthWrite: false }));
+    const sc = rand(9, 24); s.scale.set(sc, sc * 0.6, 1); ext.add(s);
+    cine.clouds.push({ s, x: rand(-30, 30), y: rand(-7, 11), z: rand(-100, 6), v: rand(9, 15) });
+  }
+  cine.heli = makeHeli(); ext.add(cine.heli.g); charify(cine.heli.g);
+  // ---- interior: the cabin, set far away from the clouds ----
+  const cab = new THREE.Group(); cab.position.set(300, 0, 0); cineScene.add(cab); cine.cab = cab;
+  const wall = mat(0x4a5058, { metal: 0.4, rough: 0.55 }), panel = mat(0x23272b, { rough: 0.6 }), seatM = mat(0x34352f, { rough: 0.85 }), floorM = mat(0x1e2126, { metal: 0.4, rough: 0.6 });
+  part(cab, 2.4, 0.06, 5.8, floorM, 0, -0.03, 0.6); part(cab, 2.4, 0.06, 5.8, panel, 0, 1.8, 0.6);
+  for (const sx of [-1, 1]) { part(cab, 0.06, 1.84, 5.8, wall, sx * 1.2, 0.9, 0.6); for (let z = -1.6; z < 3.4; z += 0.8) part(cab, 0.08, 1.84, 0.06, panel, sx * 1.16, 0.9, z); }
+  part(cab, 2.4, 1.84, 0.06, wall, 0, 0.9, 3.5);
+  cine.skyTex = canvasTex(128, (g, s) => { g.fillStyle = '#c4ccd4'; g.fillRect(0, 0, s, s); for (let i = 0; i < 18; i++) { const x = rand(0, s), y = rand(0, s), r = rand(10, 30), gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(250,252,255,.8)'); gr.addColorStop(1, 'rgba(250,252,255,0)'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); } });
+  const winM = new THREE.MeshBasicMaterial({ map: cine.skyTex, color: 0xd0d6dc, fog: false });
+  for (const sx of [-1, 1]) for (const z of [0.5, 1.9]) { const w = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.48), winM); w.position.set(sx * 1.16, 1.22, z); w.rotation.y = -sx * Math.PI / 2; cab.add(w); }
+  { const ws = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 0.95), winM); ws.position.set(0, 1.32, -2.12); cab.add(ws); part(cab, 0.06, 0.95, 0.04, panel, 0, 1.32, -2.1); }
+  // instrument panel, radar, buttons, overhead console
+  part(cab, 2.2, 0.55, 0.4, panel, 0, 0.82, -1.78); part(cab, 2.2, 0.08, 0.5, panel, 0, 1.12, -1.72);
+  const rc = document.createElement('canvas'); rc.width = rc.height = 64; cine.radar = { c: rc, g: rc.getContext('2d'), tex: new THREE.CanvasTexture(rc) };
+  const radar = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.26), new THREE.MeshBasicMaterial({ map: cine.radar.tex })); radar.position.set(0, 0.86, -1.57); cab.add(radar);
+  const mfd = new THREE.MeshStandardMaterial({ color: 0x0a140c, emissive: 0x3ac060, emissiveIntensity: 0.8 }), amber = new THREE.MeshStandardMaterial({ color: 0x140e04, emissive: 0xe0a030, emissiveIntensity: 0.8 });
+  for (const [x, m] of [[-0.62, mfd], [-0.33, amber], [0.33, mfd], [0.62, amber]]) part(cab, 0.22, 0.18, 0.02, m, x, 0.88, -1.57);
+  cine.buttons = [];
+  for (let i = 0; i < 18; i++) { const b = new THREE.Mesh(boxGeo(0.03, 0.02, 0.02), new THREE.MeshBasicMaterial({ color: pick([0x40ff60, 0xffb020, 0xff3020, 0x60c0ff]) })); b.position.set(-0.85 + (i % 9) * 0.21, 0.66 + Math.floor(i / 9) * 0.06, -1.57); cab.add(b); cine.buttons.push(b); }
+  part(cab, 0.7, 0.12, 0.9, panel, 0, 1.72, -1.05);
+  for (let i = 0; i < 8; i++) { const b = new THREE.Mesh(boxGeo(0.03, 0.02, 0.03), new THREE.MeshBasicMaterial({ color: i % 3 ? 0x40ff60 : 0xffb020 })); b.position.set(-0.25 + (i % 4) * 0.16, 1.655, -1.3 + Math.floor(i / 4) * 0.3); cab.add(b); cine.buttons.push(b); }
+  const seat = (x, z, hb = 0.8) => { part(cab, 0.55, 0.45, 0.5, seatM, x, 0.22, z); part(cab, 0.55, hb, 0.12, seatM, x, 0.45 + hb / 2, z + 0.3); };
+  seat(-0.5, -0.75); seat(0.5, -0.75); seat(-0.6, 1.15, 0.5); seat(0.6, 1.15, 0.5);
+  part(cab, 0.5, 0.35, 0.4, mat(0x3a3a2a), 0.6, 0.62, 1.1); part(cab, 0.06, 0.6, 0.06, mat(0x222222), 0, 0.3, -0.35); // gear bag, cyclic
+  for (let i = 0; i < 4; i++) part(cab, 0.02, 0.02, 2.4, mat(0x6a6a5a), 1.13, 0.6 + i * 0.25, 1.9); // cargo net
+  { const l = new THREE.PointLight(0xdfe8f0, 2.2, 6, 1.5); l.position.set(0.3, 1.25, 2.2); cab.add(l); const p = new THREE.PointLight(0x70ff90, 1.2, 2.5, 1.5); p.position.set(0, 1.0, -1.4); cab.add(p); }
+  // cast: the hero (same look as in play) and two pilots
+  const hero = makeHumanoid({ shirt: mat(0x5a3a22, { rough: 0.6 }), sleeve: mat(0x5a3a22, { rough: 0.6 }), vest: mat(0x2a2620), pants: mat(0x2a3240), skin: mat(0xc9a07e), hair: mat(0x3a2818), hairBack: true, glove: mat(0x1a1612), boots: mat(0x1e1712) });
+  const doc = grp(hero.armR.hand, 0, -0.06, 0.06); doc.rotation.x = -1.1;
+  part(doc, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, 0); part(doc, 0.21, 0.28, 0.005, mat(0xd8d2c0), 0, 0, 0.01); part(doc, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.09, 0.014);
+  const copilot = makeHumanoid(pilotLook(0x4a5038)), pilot = makeHumanoid(pilotLook(0x464c36));
+  addHelmet(copilot); addHelmet(pilot);
+  for (const [h, x, z] of [[hero, -0.6, 1.08], [copilot, -0.5, -0.83], [pilot, 0.5, -0.83]]) { h.root.position.set(x, 0, z); h.root.rotation.y = Math.PI; cab.add(h.root); charify(h.root); }
+  Object.assign(cine, { hero, copilot, pilot });
+}
+function drawRadar(t) {
+  const { g, c, tex } = cine.radar, s = c.width, a = t * 2.4;
+  g.fillStyle = '#031006'; g.fillRect(0, 0, s, s); g.strokeStyle = '#1a6a2a'; g.lineWidth = 1;
+  for (const r of [10, 20, 30]) { g.beginPath(); g.arc(32, 32, r, 0, 7); g.stroke(); }
+  g.strokeStyle = '#60ff80'; g.lineWidth = 2; g.beginPath(); g.moveTo(32, 32); g.lineTo(32 + Math.cos(a) * 30, 32 + Math.sin(a) * 30); g.stroke();
+  g.fillStyle = '#a0ffb0'; for (const [x, y] of [[44, 18], [20, 40], [48, 44]]) { const d = ((Math.atan2(y - 32, x - 32) - a) % 6.283 + 6.283) % 6.283; if (d > 5.3) g.fillRect(x, y, 3, 3); }
+  tex.needsUpdate = true;
+}
+// talking: a small nod rhythm while a line is spoken (the heads have no mouths)
+const talk = (t, a, b) => (t > a && t < b ? Math.sin((t - a) * 9) * 0.035 + Math.sin((t - a) * 3.1) * 0.03 : 0);
+
+// ---- STAGE 1 opening ----
+const MOVIES = {
+  stage1: {
+    dur: 22.5,
+    subs: [
+      [7.1, 10.9, '副操縦士', '自動運転、解除します。ここからは手動で目的地まで向かいます。'],
+      [12.0, 16.0, '操縦士', 'にしても、今回の任務は不気味ですよね。カーヴァーさんも、あんまり気乗りしないでしょう。'],
+      [16.3, 18.4, '副操縦士', 'いわゆる貧乏くじってやつですね。'],
+      [18.6, 22.2, '副操縦士', 'カーヴァーさんも出世街道を渡っているから、上からの指令は無下にはできませんよね。'],
+    ],
+    fade: t => Math.max(1 - seg(t, 0, 0.6), seg(t, 3.9, 4.5) * (t < 4.5 ? 1 : 0), t >= 4.5 ? 1 - seg(t, 4.5, 5.1) : 0, seg(t, 21.9, 22.5)),
+    sound: t => (t < 4.5 ? 'out' : 'in'),
+    render(t) {
+      const ext = t < 4.5; cine.ext.visible = ext; cine.cab.visible = !ext;
+      if (ext) this.cut1(t); else if (t < 11.5) this.cut2(t - 4.5); else this.cut3(t - 11.5);
+    },
+    // カット1：雲の中から、揺れるヘリの正面が現れる
+    cut1(t) {
+      cineScene.fog.color.setHex(0x7a828a); cineScene.fog.density = 0.034; cineScene.background.setHex(0x7a828a);
+      for (const c of cine.clouds) { const z = ((c.z + t * c.v + 100) % 106) - 100; c.s.position.set(c.x, c.y + 1.5, z); }
+      const H = cine.heli, k = easeIO(seg(t, 1.9, 4.2));
+      H.g.position.set(Math.sin(t * 1.1) * 0.3, 0.6 + Math.sin(t * 1.3) * 0.25, t < 1.9 ? -120 : lerp(-55, -13, k));
+      H.g.rotation.set(-0.12 + Math.sin(t * 1.7) * 0.04, Math.sin(t * 0.8) * 0.05, Math.sin(t * 2.1) * 0.07 + Math.sin(t * 5.3) * 0.02);
+      H.rotor.rotation.y = t * 29; H.tail.rotation.x = t * 61; H.beacon.visible = (t * 1.4) % 1 < 0.18;
+      cineCam.position.set(Math.sin(t * 13) * 0.03, 1.6 + Math.sin(t * 17) * 0.02, 0); cineCam.lookAt(0, 1.8, -20); cine.fov = 46;
+    },
+    // カット2：キャビンを後ろから。資料を読む主人公、計器を確かめる副操縦士、「自動運転、解除します」、うなずく操縦士
+    cut2(t) { this.cabin(t + 4.5); const C = cine.cab.position, j = Math.sin(t * 47) * 0.004;
+      cineCam.position.set(C.x + 0.55 + Math.sin(t * 0.7) * 0.03, 1.6 + Math.sin(t * 1.1) * 0.02 + j, 3.25); cineCam.lookAt(C.x - 0.3, 0.95, -1.4); cine.fov = 60; },
+    // カット3：キャビンからコックピットへズーム。操縦士と副操縦士の会話
+    cut3(t) { this.cabin(t + 11.5); const C = cine.cab.position, k = easeIO(seg(t, 0, 4)), j = Math.sin(t * 47) * 0.004;
+      cineCam.position.set(C.x + lerp(0.2, 0.0, k), lerp(1.6, 1.62, k) + j, lerp(2.6, 0.65, k)); cineCam.lookAt(C.x, lerp(1.0, 1.08, k), -1.7); cine.fov = lerp(60, 52, k); },
+    // the cabin at movie time T (shared by cuts 2 and 3)
+    cabin(T) {
+      cineScene.fog.color.setHex(0x2a2e32); cineScene.fog.density = 0.01; cineScene.background.setHex(0x2a2e32);
+      cine.skyTex.offset.set(T * 0.25, Math.sin(T * 0.6) * 0.02); drawRadar(T);
+      cine.buttons.forEach((b, i) => { b.visible = ((T * (0.7 + (i % 5) * 0.31) + i * 0.37) % 1) < 0.7; });
+      // the hero: reads the file, then rests it on his knee and looks out of the window, thinking
+      const r = easeIO(seg(T, 8.2, 9.4)), hp = SEAT();
+      Object.assign(hp, { rsx: lerp(-1.05, -0.5, r), rex: lerp(-1.35, -0.45, r), lsx: lerp(-0.55, -0.4, r), lex: lerp(-0.95, -0.35, r), lsz: 0.15, tx: lerp(0.14, 0.04, r), hx: lerp(0.5, 0.05, r), hy: lerp(0, 0.6, easeIO(seg(T, 9.0, 10.4))) });
+      setPose(cine.hero, hp);
+      // co-pilot: checks the buttons and the radar, then speaks
+      const reach = Math.sin(Math.PI * seg(T, 5.2, 7.0)), cp = SEAT();
+      Object.assign(cp, { rsx: lerp(-0.6, -1.4, reach) + Math.sin(T * 10) * 0.04 * reach, rex: lerp(-0.8, -0.15, reach), lsx: -0.55, lex: -0.9, hx: lerp(0.1, 0.35, reach) + talk(T, 7.1, 10.9) + talk(T, 16.3, 22.2), hy: lerp(0, -0.25, seg(T, 7.0, 7.4)) - 0.55 * Math.sin(Math.PI * seg(T, 16.0, 22.4)) + 1.6 * Math.sin(Math.PI * seg(T, 19.4, 21.6)), ty: 0.35 * Math.sin(Math.PI * seg(T, 19.4, 21.6)) });
+      setPose(cine.copilot, cp);
+      // pilot: hands on the controls, nods at the co-pilot, then glances back at the hero while he speaks
+      const nod = Math.sin(Math.PI * seg(T, 10.9, 11.4)) * 0.3, back = Math.sin(Math.PI * seg(T, 13.6, 16.2)), pp = SEAT();
+      Object.assign(pp, { rsx: -0.6, rex: -0.8, lsx: -0.5, lex: -0.95, hx: 0.05 + nod + talk(T, 12.0, 16.0), hy: back * 1.15, ty: back * 0.35 });
+      setPose(cine.pilot, pp);
+    },
+  },
+};
+
+// ---- player ----
+let cineHeli = null;
+function heliSound(mode) {
+  if (!AC.ctx) return;
+  const ctx = AC.ctx;
+  if (!cineHeli) {
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 320;
+    const amp = ctx.createGain(); amp.gain.value = 0.35;
+    const lfo = ctx.createOscillator(); lfo.type = 'sawtooth'; lfo.frequency.value = 5.2; const depth = ctx.createGain(); depth.gain.value = 0.3; lfo.connect(depth); depth.connect(amp.gain);
+    const whine = ctx.createOscillator(); whine.type = 'sine'; whine.frequency.value = 1180; const wg = ctx.createGain(); wg.gain.value = 0.0;
+    const master = out(0.0, 0, 0.05);
+    src.connect(lp); lp.connect(amp); amp.connect(master); whine.connect(wg); wg.connect(master);
+    src.start(); lfo.start(); whine.start();
+    cineHeli = { src, lfo, whine, lp, wg, master };
+  }
+  const t = ctx.currentTime, H = cineHeli;
+  if (mode === 'off') { H.master.gain.setTargetAtTime(0, t, 0.3); setTimeout(() => { try { H.src.stop(); H.lfo.stop(); H.whine.stop(); } catch (e) { } }, 1500); cineHeli = null; return; }
+  H.master.gain.setTargetAtTime(mode === 'out' ? 0.9 : 0.75, t, 0.25);
+  H.lp.frequency.setTargetAtTime(mode === 'out' ? 380 : 190, t, 0.2);
+  H.wg.gain.setTargetAtTime(mode === 'out' ? 0.01 : 0.025, t, 0.2);
+}
+function playMovie(id, onEnd) {
+  buildCine(); initAudio();
+  cine.movie = MOVIES[id]; cine.t = 0; cine.onEnd = onEnd; cine.sound = null; cine.sub = -1;
+  ['title', 'hud', 'touch', 'win', 'dead'].forEach(k => $(k)?.classList.add('hidden'));
+  $('cine').classList.remove('hidden'); setH('cineWho', ''); setH('cineLine', '');
+  game.state = 'cine'; setMusic('none'); laser.visible = laserDot.visible = false;
+  renderCine(0);
+}
+function renderCine(t) {
+  const M = cine.movie; M.render(t);
+  cineCam.aspect = viewW / viewH; cineCam.fov = Math.min(90, (cine.fov || 50) * fovMul); cineCam.updateProjectionMatrix();
+  renderer.toneMappingExposure = 1.15;
+  $('cineFade').style.opacity = clamp(M.fade(t), 0, 1).toFixed(3);
+  const i = M.subs.findIndex(s => t >= s[0] && t < s[1]);
+  if (i !== cine.sub) { cine.sub = i; setH('cineWho', i < 0 ? '' : M.subs[i][2]); setH('cineLine', i < 0 ? '' : M.subs[i][3]); }
+  const snd = M.sound(t); if (snd !== cine.sound) { cine.sound = snd; heliSound(snd); }
+}
+function updateCine(dt) {
+  if (!cine.paused) cine.t += dt;
+  if (cine.t >= cine.movie.dur) { endMovie(); return; }
+  renderCine(cine.t);
+}
+function endMovie() {
+  if (game.state !== 'cine') return;
+  heliSound('off'); cine.sound = null;
+  $('cine').classList.add('hidden'); game.state = 'title';
+  const f = cine.onEnd; cine.onEnd = null; if (f) f();
+}
+$('cineSkip').onclick = e => { e.stopPropagation(); endMovie(); };
+$('cineSkip').addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); endMovie(); }, { passive: false });
+
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   tick(dt);
-  const title = game.state === 'title';
-  renderer.setRenderTarget(psxRT); renderer.render(title ? titleScene : scene, title ? titleCam : camera);
+  const title = game.state === 'title', cin = game.state === 'cine';
+  renderer.setRenderTarget(psxRT); renderer.render(cin ? cineScene : title ? titleScene : scene, cin ? cineCam : title ? titleCam : camera);
   renderer.setRenderTarget(null); renderer.render(postScene, postCam);
 }
 function tick(dt) {
@@ -3727,6 +3943,8 @@ function tick(dt) {
     for (const b of barrels) if (b.alive && b.fuse >= 0) { b.fuse -= dt; if (b.fuse < 0) blowBarrel(b); }
     updateDirector(dt);
     updateCamera(dt); updateLaser(); updateHUD(dt);
+  } else if (game.state === 'cine') {
+    updateCine(dt);
   } else if (game.state === 'title') {
     updateTitleScene(dt);
     titleCam.aspect = viewW / viewH; titleCam.fov = Math.min(90, 48 * fovMul); titleCam.updateProjectionMatrix();
@@ -3769,4 +3987,4 @@ buildStage('village');
 requestAnimationFrame(frame);
 
 // debug handle for automated testing
-window.__game = { playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
+window.__game = { cine, playMovie, renderCine, playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
