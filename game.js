@@ -132,6 +132,13 @@ const ATMOS = {
   indoor:     { sky: [0x050505, 0x0a0a0a, 0x050505], fog: 0x0c0c0e, dens: 0.045, hs: 0x8090a0, hg: 0x141210, hi: 0.3, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.45 },
   indoorDark: { sky: [0x020202, 0x040404, 0x020202], fog: 0x050506, dens: 0.06, hs: 0x506070, hg: 0x0a0a0a, hi: 0.12, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.6, vis: 0.45 },
   indoorRed:  { sky: [0x050202, 0x0a0404, 0x050202], fog: 0x140606, dens: 0.05, hs: 0xa05048, hg: 0x140808, hi: 0.22, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.5 },
+  tunnel:     { sky: [0x040403, 0x080806, 0x040403], fog: 0x12120c, dens: 0.045, hs: 0x9a9070, hg: 0x12100a, hi: 0.3, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.45 },
+  tunnelDark: { sky: [0x020202, 0x030303, 0x020202], fog: 0x060605, dens: 0.06, hs: 0x5a5a48, hg: 0x0a0a08, hi: 0.12, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.6, vis: 0.45 },
+  tunnelBoss: { sky: [0x050302, 0x0a0604, 0x050302], fog: 0x160c08, dens: 0.045, hs: 0xa06a48, hg: 0x140a06, hi: 0.3, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.5 },
+  lab:        { sky: [0x050607, 0x0a0c0e, 0x050607], fog: 0x161c20, dens: 0.032, hs: 0xb0c8d8, hg: 0x12161a, hi: 0.45, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.35 },
+  labAlarm:   { sky: [0x050202, 0x0a0404, 0x050202], fog: 0x1a0808, dens: 0.045, hs: 0xc05048, hg: 0x140808, hi: 0.25, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.5 },
+  labDark:    { sky: [0x020302, 0x030403, 0x020302], fog: 0x040806, dens: 0.06, hs: 0x507060, hg: 0x080a08, hi: 0.12, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.6, vis: 0.45 },
+  labCore:    { sky: [0x020503, 0x041008, 0x020503], fog: 0x0a180e, dens: 0.04, hs: 0x70c088, hg: 0x081008, hi: 0.35, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.45 },
   blood: { sky: [0x0a0204, 0x5a0e0c, 0x060202], fog: 0x2e0c0a, dens: 0.030, hs: 0xc06050, hg: 0x140808, hi: 0.6, sc: 0xff5a3a, si: 1.0, dir: [-0.2, 0.6, 0.5], exp: 1.2 },
 };
 // Characters (player, enemies, trader) get a slight lift so they read against dark backdrops:
@@ -1189,6 +1196,12 @@ const ETYPES = {
   runner: { hp: 34, speed: 3.1, dmg: 10, range: 1.5, windup: 0.45, recover: 0.6, grab: 0.35, zombie: true },
   fat:    { hp: 170, speed: 0.85, dmg: 26, range: 1.9, windup: 0.95, recover: 1.0, grab: 0, scale: 1.12, bulk: 1.6, zombie: true },
   mutant: { hp: 1800, speed: 1.9, dmg: 36, range: 3.8, weapon: 'claw', scale: 1.75, bulk: 1.5, boss: true, coreHue: 0.0 },
+  // underground (stage 3) / lab (stage 4)
+  worker: { hp: 52, speed: 1.2, dmg: 13, range: 1.5, windup: 0.75, recover: 0.8, grab: 0.5, zombie: true },
+  sci:    { hp: 40, speed: 1.35, dmg: 11, range: 1.5, windup: 0.7, recover: 0.75, grab: 0.55, zombie: true },
+  guard:  { hp: 72, speed: 1.25, dmg: 15, range: 1.5, windup: 0.7, recover: 0.8, grab: 0.45, zombie: true },
+  digger: { hp: 2100, speed: 1.8, dmg: 38, range: 3.8, weapon: 'maul', scale: 1.7, bulk: 1.6, boss: true, coreHue: 0.1 },
+  origin: { hp: 2600, speed: 2.0, dmg: 40, range: 4.0, weapon: 'claw', scale: 1.9, bulk: 1.45, boss: true, coreHue: 0.3 },
 };
 
 const VILLAGE_WAVES = [
@@ -1475,12 +1488,14 @@ function stationAssets() {
   return IN;
 }
 const WALL_T = 0.4;
+// stage builders may swap the material used by wallSeg / floorCeil (reset by clearWorld)
+const SURF = { wall: null, ceil: null };
 function wallSeg(x0, z0, x1, z1, h) { // axis-aligned, (x0,z0)-(x1,z1)
   const I = stationAssets();
   const w = Math.abs(x1 - x0) || WALL_T, d = Math.abs(z1 - z0) || WALL_T;
   if (w < 0.05 || d < 0.05) return;
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-  meshAt(scaleBoxUV(new THREE.BoxGeometry(w, h, d), w, h, d, 4), I.wall, cx, h / 2, cz);
+  meshAt(scaleBoxUV(new THREE.BoxGeometry(w, h, d), w, h, d, 4), SURF.wall || I.wall, cx, h / 2, cz);
   addSolid(cx, cz, w, d, h);
 }
 // a straight wall along X (fixed z) or Z (fixed x) from a to b, leaving gaps
@@ -1493,7 +1508,7 @@ function wallLine(axis, fixed, a, b, h, gaps = []) {
 function floorCeil(x0, x1, z0, z1, h, floorMat, unit = 2) {
   const I = stationAssets();
   groundPlane((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, floorMat, unit, 0.01);
-  const c = groundPlane((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, I.ceil, 2, h); c.rotation.x = Math.PI / 2;
+  const c = groundPlane((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, SURF.ceil || I.ceil, 2, h); c.rotation.x = Math.PI / 2;
 }
 function room(x0, x1, z0, z1, h, floorMat, doors = {}) {
   floorCeil(x0, x1, z0, z1, h, floorMat);
@@ -1505,6 +1520,7 @@ function room(x0, x1, z0, z1, h, floorMat, doors = {}) {
 function ceilingLight(x, z, h, o = {}) {
   const I = stationAssets();
   const m = meshAt(new THREE.BoxGeometry(0.5, 0.08, 1.6), o.off ? I.panelOff : I.panel.clone(), x, h - 0.05, z, world, false);
+  if (o.color && !o.off) m.material.emissive.setHex(o.color);
   let light = null;
   if (o.light) { light = new THREE.PointLight(o.color || 0xffe8c8, o.i || 8, o.dist || 16, 1.5); light.position.set(x, h - 0.4, z); world.add(light); }
   if (!o.off) lamps.push({ light, base: o.i || 8, mode: o.mode || 'steady', mesh: m, t: rand(0, 9) });
@@ -1593,6 +1609,225 @@ function buildStationInterior() {
   stall(-11.1, 6.6, Math.PI / 2);
 }
 
+// ---- STAGE 3: underground passage + subway ----
+let SUB = null;
+function subwayAssets() {
+  if (SUB) return SUB;
+  const tile = canvasTex(256, (g, s) => {
+    g.fillStyle = '#b8b4a4'; g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s * 0.62; y += 16) for (let x = (y / 16) % 2 ? -16 : 0; x < s; x += 32) { g.fillStyle = pick(['#c4c0b0', '#b0ac9c', '#bcb8a8']); g.fillRect(x + 1, y + 1, 30, 14); }
+    const band = s * 0.62; g.fillStyle = '#1e4a3a'; g.fillRect(0, band, s, 10); g.fillStyle = '#2a2c28'; g.fillRect(0, band + 10, s, s - band - 10);
+    speckle(g, s, 40, ['rgba(60,50,30,.35)', 'rgba(20,20,10,.4)'], 6, 30, 0.15, 0.4);
+    g.fillStyle = 'rgba(70,40,20,.35)'; for (let i = 0; i < 6; i++) { const x = rand(0, s); g.fillRect(x, rand(0, band), rand(2, 4), rand(30, 120)); }
+  });
+  const concrete = canvasTex(256, (g, s) => {
+    g.fillStyle = '#4c4a44'; g.fillRect(0, 0, s, s);
+    speckle(g, s, 3000, ['#3e3c37', '#58564f', '#45433d'], 0.5, 1.6, 0.3, 0.8);
+    speckle(g, s, 25, ['rgba(30,26,20,.5)', 'rgba(70,60,40,.3)'], 8, 40, 0.15, 0.4);
+    g.fillStyle = 'rgba(0,0,0,.35)'; for (let y = 0; y < s; y += 64) g.fillRect(0, y, s, 2);
+  });
+  const floor = canvasTex(256, (g, s) => {
+    g.fillStyle = '#5a5850'; g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s; y += 64) for (let x = 0; x < s; x += 64) { g.fillStyle = pick(['#625f56', '#57554d', '#5e5b52']); g.fillRect(x + 1, y + 1, 62, 62); }
+    speckle(g, s, 1500, ['#4a4840', '#6a675e'], 0.5, 1.4, 0.3, 0.7); speckle(g, s, 10, ['rgba(60,10,8,.5)'], 6, 18, 0.3, 0.6);
+  });
+  const ballast = canvasTex(256, (g, s) => { g.fillStyle = '#34312c'; g.fillRect(0, 0, s, s); speckle(g, s, 6000, ['#2a2722', '#46423b', '#3c3832', '#22201c'], 0.8, 2.4, 0.5, 1); });
+  const ceil = canvasTex(256, (g, s) => { g.fillStyle = '#2c2b27'; g.fillRect(0, 0, s, s); speckle(g, s, 2000, ['#24231f', '#36342f'], 0.5, 1.5, 0.3, 0.8); g.fillStyle = '#1a1916'; for (let i = 0; i <= s; i += 128) g.fillRect(i, 0, 6, s); });
+  SUB = {
+    tile: new THREE.MeshStandardMaterial({ map: tile, roughness: 0.4 }),
+    concrete: new THREE.MeshStandardMaterial({ map: concrete, roughness: 0.95 }),
+    floor: new THREE.MeshStandardMaterial({ map: floor, roughness: 0.7 }),
+    ballast: new THREE.MeshStandardMaterial({ map: ballast, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }),
+    ceil: new THREE.MeshStandardMaterial({ map: ceil, roughness: 1, side: THREE.DoubleSide }),
+    rail: mat(0x8a8680, { metal: 0.8, rough: 0.35 }), sleeper: mat(0x2c2620), pipe: mat(0x4a4038, { metal: 0.4, rough: 0.6 }),
+    stripe: mat(0xc8a020, { rough: 0.6 }), body: mat(0x8a8e90, { metal: 0.5, rough: 0.45 }), band: mat(0x1e5a8a, { rough: 0.5 }),
+    win: new THREE.MeshStandardMaterial({ color: 0x0a0e12, roughness: 0.15, metalness: 0.6, emissive: 0x18242a, emissiveIntensity: 0.6 }),
+  };
+  return SUB;
+}
+// a pair of rails on sleepers along Z, centred on x
+function track(x, z0, z1) {
+  const S = subwayAssets(), L = z1 - z0, cz = (z0 + z1) / 2;
+  groundPlane(x, cz, 3.2, L, S.ballast, 2, 0.02);
+  for (const dx of [-0.72, 0.72]) meshAt(new THREE.BoxGeometry(0.08, 0.14, L), S.rail, x + dx, 0.12, cz, world, false);
+  const n = Math.floor(L / 0.75), im = new THREE.InstancedMesh(boxGeo(2.4, 0.08, 0.24), S.sleeper, n), o = new THREE.Object3D();
+  for (let i = 0; i < n; i++) { o.position.set(x, 0.05, z0 + 0.4 + i * 0.75); o.updateMatrix(); im.setMatrixAt(i, o.matrix); }
+  im.receiveShadow = true; world.add(im);
+}
+// a parked subway car along Z
+function trainCar(x, z, len, o = {}) {
+  const S = subwayAssets(), g = new THREE.Group(); g.position.set(x, 0, z); world.add(g);
+  meshAt(new THREE.BoxGeometry(2.8, 2.9, len), S.body, 0, 1.75, 0, g);
+  meshAt(new THREE.BoxGeometry(2.6, 0.3, len - 0.4), mat(0x1a1a1c), 0, 0.15, 0, g);
+  for (const sx of [-1, 1]) {
+    meshAt(new THREE.BoxGeometry(0.02, 0.22, len), S.band, sx * 1.41, 1.15, 0, g, false);
+    for (let k = -len / 2 + 1.6; k < len / 2 - 1; k += 2.4) {
+      if (Math.round(k / 2.4) % 3 === 0) meshAt(new THREE.BoxGeometry(0.02, 2.0, 1.2), mat(0x6a6e70, { metal: 0.5, rough: 0.5 }), sx * 1.415, 1.3, k, g, false);
+      else meshAt(new THREE.BoxGeometry(0.02, 0.8, 1.6), S.win, sx * 1.415, 2.05, k, g, false);
+    }
+  }
+  for (const sz of [-1, 1]) { meshAt(new THREE.BoxGeometry(1.4, 0.9, 0.02), S.win, 0, 2.1, sz * (len / 2 + 0.01), g, false); if (o.lights) for (const lx of [-0.9, 0.9]) meshAt(new THREE.BoxGeometry(0.2, 0.12, 0.03), new THREE.MeshBasicMaterial({ color: sz > 0 ? 0xfff0c0 : 0xff2010 }), lx, 0.9, sz * (len / 2 + 0.02), g, false); }
+  addSolid(x, z, 2.8, len, 3.2);
+}
+function pipeRun(x, z0, z1, y, r = 0.12) {
+  const S = subwayAssets(), m = meshAt(new THREE.CylinderGeometry(r, r, z1 - z0, 8), S.pipe, x, y, (z0 + z1) / 2, world, false); m.rotation.x = Math.PI / 2;
+}
+function buildSubway() {
+  const S = subwayAssets(), I = stationAssets();
+  // maintenance passage down from the police station (start)
+  SURF.wall = S.concrete; SURF.ceil = S.ceil;
+  floorCeil(-2, 2, 24, 42, 3.4, S.floor); wallLine('z', -2, 24, 42, 3.4); wallLine('z', 2, 24, 42, 3.4, [[27, 37]]); wallSeg(-2.2, 42, 2.2, 42, 3.4);
+  for (const y of [2.6, 2.95]) pipeRun(-1.7, 24, 42, y);
+  ceilingLight(0, 38, 3.4, { light: true, i: 6, dist: 12 }); ceilingLight(0, 28, 3.4, { mode: 'flicker' });
+  // pump room off the passage
+  room(2, 13, 27, 37, 3.6, S.floor, { w: [[30, 34]] });
+  for (const z of [29, 35]) { const t = meshAt(new THREE.CylinderGeometry(1, 1, 2.4, 12), S.pipe, 10.5, 1.2, z); void t; addSolid(10.5, z, 2, 2, 2.4); }
+  meshAt(new THREE.BoxGeometry(1.6, 1.4, 1), I.steel, 6, 0.7, 28); addSolid(6, 28, 1.6, 1, 1.4);
+  for (const y of [2.8, 3.1]) { const m = meshAt(new THREE.CylinderGeometry(0.1, 0.1, 11, 8), S.pipe, 7.5, y, 36.6, world, false); m.rotation.z = Math.PI / 2; }
+  ceilingLight(7.5, 32, 3.6, { light: true, color: 0xff4020, i: 6, dist: 12, mode: 'pulse' });
+  // ticket hall
+  SURF.wall = S.tile;
+  room(-12, 12, 12, 24, 4.5, S.floor, { s: [[-2, 2]], n: [[-3, 3]] });
+  for (let x = -10.5; x <= 10.5; x += 2.6) if (Math.abs(x) > 1.5) { meshAt(new THREE.BoxGeometry(0.35, 1.0, 1.3), I.steel, x, 0.5, 16.5); addSolid(x, 16.5, 0.35, 1.3, 1.0); }
+  meshAt(new THREE.BoxGeometry(4, 2.4, 2.2), mat(0x2a3a44, { rough: 0.6 }), -9.6, 1.2, 21.6); addSolid(-9.6, 21.6, 4, 2.2, 2.4);
+  meshAt(new THREE.BoxGeometry(3.6, 0.9, 0.02), S.win, -9.6, 1.7, 20.48, world, false);
+  { const s = neonSign('METRO', '#5ab8ff', 4); s.position.set(0, 3.6, 12.25); world.add(s); }
+  { const b = meshAt(new THREE.PlaneGeometry(3, 1.6), mat(0xd8d4c4), 6, 2.3, 23.78, world, false); b.rotation.y = Math.PI; for (let i = 0; i < 4; i++) { const l = meshAt(new THREE.PlaneGeometry(2.6, 0.05), mat(pick([0xc03020, 0x2060a0, 0x30a050, 0xc0a020])), 6, 1.8 + i * 0.3, 23.77, world, false); l.rotation.y = Math.PI; } }
+  ceilingLight(-6, 19, 4.5, { light: true, i: 10, dist: 18 }); ceilingLight(6, 19, 4.5, { mode: 'flicker' }); ceilingLight(0, 14, 4.5);
+  // platform hall: two tracks either side of an island platform
+  room(-16, 16, -12, 12, 6, S.floor, { s: [[-12.2, 12.2]], n: [[-15, -7], [7, 15]] });
+  track(-11, -43, 12); track(11, -43, 12);
+  for (const sx of [-1, 1]) groundPlane(sx * 7.75, 0, 0.35, 24, S.stripe, 1, 0.03);
+  for (const x of [-4, 4]) for (const z of [-8, -1, 6]) { meshAt(new THREE.BoxGeometry(0.8, 6, 0.8), S.tile, x, 3, z); addSolid(x, z, 0.8, 0.8, 6); }
+  for (const z of [-4.5, 2.5]) { meshAt(new THREE.BoxGeometry(0.5, 0.45, 2), I.steel, 0, 0.3, z); addSolid(0, z, 0.5, 2, 0.5); }
+  trainCar(-11, 1.5, 13, { lights: true });
+  for (const sx of [-1, 1]) { const s = neonSign('CENTRAL', '#e8e0c0', 5); s.position.set(sx * 15.78, 3.4, sx * 4); s.rotation.y = -sx * Math.PI / 2; world.add(s); }
+  ceilingLight(0, -6, 6, { light: true, i: 12, dist: 22 }); ceilingLight(0, 6, 6, { light: true, i: 12, dist: 22, mode: 'flicker' });
+  ceilingLight(11, -8, 6); ceilingLight(-11, 9, 6, { off: true });
+  // track tunnels north to the depot
+  SURF.wall = S.concrete;
+  for (const cx of [-11, 11]) {
+    floorCeil(cx - 4, cx + 4, -28, -12, 5, S.floor); wallLine('z', cx - 4, -28, -12, 5); wallLine('z', cx + 4, -28, -12, 5);
+    pipeRun(cx - 3.7, -28, -12, 3.8, 0.15);
+    ceilingLight(cx, -20, 5, { light: true, color: 0xff3020, i: 6, dist: 10, mode: 'pulse' });
+  }
+  meshAt(new THREE.BoxGeometry(1.6, 1.2, 2.6), mat(0x8a6a20, { metal: 0.4, rough: 0.6 }), 13, 0.75, -17); addSolid(13, -17, 1.6, 2.6, 1.3);
+  // train depot (boss arena) with the sealed door to the lab
+  room(-22, 22, -43, -28, 8, S.floor, { s: [[-15, -7], [7, 15]] });
+  track(-18, -43, -30); track(18, -43, -30); track(0, -43, -34);
+  trainCar(-18, -36.5, 11); trainCar(18, -37, 11);
+  for (const x of [-6, 6]) { meshAt(new THREE.BoxGeometry(1, 8, 1), S.concrete, x, 4, -34); addSolid(x, -34, 1, 1, 8); }
+  meshAt(new THREE.BoxGeometry(5, 4.4, 0.3), mat(0x4a4e52, { metal: 0.6, rough: 0.4 }), 0, 2.2, -42.65);
+  for (let i = -4; i <= 4; i++) { const st = meshAt(new THREE.BoxGeometry(0.4, 0.1, 0.02), i % 2 ? S.stripe : mat(0x111111), i * 0.5, 4.5, -42.48, world, false); st.rotation.z = 0.6; }
+  ceilingLight(-9, -35, 8, { light: true, i: 14, dist: 24, color: 0xffd8a0 }); ceilingLight(9, -35, 8, { light: true, i: 14, dist: 24, mode: 'flicker' }); ceilingLight(0, -30, 8);
+  // clutter
+  [[-12, -41], [14, -41.5], [9.5, 34.5], [-10.5, 13.5], [-6, -41.5]].forEach(p => crate(...p));
+  [[-13, -41.5], [13.5, -29.5], [4.5, 28]].forEach(p => redBarrel(...p));
+  for (let i = 0; i < 40; i++) { const p = meshAt(new THREE.PlaneGeometry(0.22, 0.3), I.paper, rand(-11, 11), 0.03, rand(13, 23), world, false); p.rotation.x = -Math.PI / 2; p.rotation.z = rand(0, 6); }
+  for (let i = 0; i < 12; i++) addDecal(rand(-14, 14), rand(-40, 22), rand(0.6, 1.6));
+}
+
+// ---- STAGE 4: underground laboratory ----
+let LAB = null;
+function labAssets() {
+  if (LAB) return LAB;
+  const wall = canvasTex(256, (g, s) => {
+    g.fillStyle = '#b4bab8'; g.fillRect(0, 0, s, s);
+    g.fillStyle = '#8a908e'; for (let x = 0; x < s; x += 64) g.fillRect(x, 0, 2, s); g.fillRect(0, s * 0.45, s, 2);
+    const band = s * 0.7; g.fillStyle = '#5a605e'; g.fillRect(0, band, s, s - band); g.fillStyle = '#a02818'; g.fillRect(0, band - 8, s, 6);
+    speckle(g, s, 30, ['rgba(40,50,40,.25)', 'rgba(90,20,10,.25)'], 6, 30, 0.15, 0.4);
+  });
+  const floor = canvasTex(256, (g, s) => { g.fillStyle = '#4a5450'; g.fillRect(0, 0, s, s); speckle(g, s, 2000, ['#424c48', '#56605c'], 0.5, 1.4, 0.3, 0.7); g.fillStyle = 'rgba(0,0,0,.3)'; for (let i = 0; i <= s; i += 128) { g.fillRect(i, 0, 2, s); g.fillRect(0, i, s, 2); } speckle(g, s, 8, ['rgba(60,10,8,.5)'], 6, 18, 0.3, 0.6); });
+  const grate = canvasTex(128, (g, s) => { g.fillStyle = '#1e2222'; g.fillRect(0, 0, s, s); g.fillStyle = '#4a5050'; for (let i = 0; i < s; i += 8) { g.fillRect(i, 0, 3, s); g.fillRect(0, i, s, 2); } });
+  const ceil = canvasTex(256, (g, s) => { g.fillStyle = '#9aa09e'; g.fillRect(0, 0, s, s); g.fillStyle = '#6a706e'; for (let i = 0; i <= s; i += 64) { g.fillRect(i, 0, 3, s); g.fillRect(0, i, s, 3); } });
+  LAB = {
+    wall: new THREE.MeshStandardMaterial({ map: wall, roughness: 0.5 }),
+    floor: new THREE.MeshStandardMaterial({ map: floor, roughness: 0.45, metalness: 0.1 }),
+    grate: new THREE.MeshStandardMaterial({ map: grate, roughness: 0.6, metalness: 0.5 }),
+    ceil: new THREE.MeshStandardMaterial({ map: ceil, roughness: 0.8, side: THREE.DoubleSide }),
+    steel: mat(0x7a8284, { metal: 0.6, rough: 0.35 }), dark: mat(0x1e2224, { metal: 0.4, rough: 0.5 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0x9adcc0, roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }),
+    liquid: new THREE.MeshStandardMaterial({ color: 0x1a6a40, emissive: 0x30c070, emissiveIntensity: 0.55, transparent: true, opacity: 0.55, depthWrite: false }),
+    specimen: mat(0x5a4048, { rough: 0.6 }),
+    screen: new THREE.MeshStandardMaterial({ color: 0x0a1a10, emissive: 0x40e080, emissiveIntensity: 0.9 }),
+    hazard: canvasTex(64, (g, s) => { g.fillStyle = '#c8a020'; g.fillRect(0, 0, s, s); g.fillStyle = '#141414'; for (let i = -s; i < s * 2; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 8, 0); g.lineTo(i + 8 - s, s); g.lineTo(i - s, s); g.fill(); } }),
+  };
+  LAB.stripe = new THREE.MeshStandardMaterial({ map: LAB.hazard, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 });
+  return LAB;
+}
+// a culture tank: glass cylinder, green fluid and something inside (broken ones are empty, with shards)
+function cultureTank(x, z, r = 0.9, h = 3.2, broken = false) {
+  const L = labAssets();
+  meshAt(new THREE.CylinderGeometry(r + 0.15, r + 0.2, 0.4, 12), L.steel, x, 0.2, z);
+  meshAt(new THREE.CylinderGeometry(r + 0.15, r + 0.15, 0.35, 12), L.steel, x, h + 0.2, z);
+  if (!broken) {
+    meshAt(new THREE.CylinderGeometry(r, r, h - 0.4, 14, 1, true), L.glass, x, h / 2 + 0.2, z, world, false);
+    meshAt(new THREE.CylinderGeometry(r * 0.95, r * 0.95, h - 0.7, 12), L.liquid, x, h / 2 + 0.05, z, world, false);
+    const sp = meshAt(new THREE.BoxGeometry(r * 0.5, h * 0.45, r * 0.4), L.specimen, x, h * 0.5, z, world, false); sp.rotation.y = rand(0, 3);
+    meshAt(new THREE.SphereGeometry(r * 0.25, 8, 6), L.specimen, x, h * 0.78, z, world, false);
+  } else {
+    meshAt(new THREE.CylinderGeometry(r, r, 0.7, 14, 1, true), L.glass, x, 0.75, z, world, false);
+    for (let i = 0; i < 6; i++) { const sh = meshAt(new THREE.BoxGeometry(rand(0.1, 0.3), 0.02, rand(0.1, 0.4)), L.glass, x + rand(-r - 1.2, r + 1.2), 0.03, z + rand(-r - 1.2, r + 1.2), world, false); sh.rotation.y = rand(0, 3); }
+    const pool = meshAt(new THREE.CircleGeometry(r + 1, 12), L.liquid, x + 0.4, 0.03, z + 0.3, world, false); pool.rotation.x = -Math.PI / 2;
+  }
+  addSolid(x, z, r * 2 + 0.3, r * 2 + 0.3, h + 0.4);
+}
+function console2(x, z, rot) {
+  const L = labAssets(), g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot; world.add(g);
+  meshAt(new THREE.BoxGeometry(1.8, 0.9, 0.8), L.dark, 0, 0.45, 0, g);
+  const sc = meshAt(new THREE.BoxGeometry(1.5, 0.6, 0.05), L.screen, 0, 1.3, -0.3, g); sc.rotation.x = -0.25;
+  const side = Math.abs(Math.sin(rot)) > 0.5; addSolid(x, z, side ? 0.8 : 1.8, side ? 1.8 : 0.8, 1.6);
+}
+function buildLab() {
+  const L = labAssets(), I = stationAssets();
+  SURF.wall = L.wall; SURF.ceil = L.ceil;
+  // airlock from the depot's sealed door (start)
+  room(-3, 3, 32, 42, 3.6, L.grate, { n: [[-1.5, 1.5]] });
+  for (const sx of [-1, 1]) { meshAt(new THREE.BoxGeometry(0.3, 3.2, 0.3), L.steel, sx * 1.75, 1.6, 32); }
+  groundPlane(0, 32, 3, 0.5, L.stripe, 1, 0.03);
+  ceilingLight(0, 37, 3.6, { light: true, i: 6, dist: 12, color: 0xc0ffd0 });
+  // entrance hall / security
+  room(-14, 14, 16, 32, 5, L.floor, { s: [[-3.2, 3.2]], n: [[-3, 3]] });
+  meshAt(new THREE.BoxGeometry(5, 1.1, 0.8), L.dark, -7, 0.55, 22); addSolid(-7, 22, 5, 0.8, 1.1);
+  console2(-7, 20.5, Math.PI); console2(7, 26, -Math.PI / 2);
+  { const s = neonSign('LEVEL B5', '#70ffb0', 5); s.position.set(0, 3.8, 16.25); world.add(s); }
+  ceilingLight(-7, 24, 5, { light: true, i: 10, dist: 18, color: 0xd8f0ff }); ceilingLight(7, 24, 5, { mode: 'flicker' }); ceilingLight(0, 19, 5);
+  // main lab: rows of culture tanks
+  room(-18, 18, -10, 16, 6, L.floor, { s: [[-14.2, 14.2]], w: [[0, 4]], e: [[0, 4]], n: [[-3, 3]] });
+  [[-12, -5, false], [-6, -5, true], [6, -5, false], [12, -5, false], [-12, 7, false], [-6, 7, false], [6, 7, true], [12, 7, false]].forEach(([x, z, b]) => cultureTank(x, z, 0.9, 3.2, b));
+  for (const x of [-9, 9]) { meshAt(new THREE.BoxGeometry(1.2, 0.9, 3), L.steel, x, 0.45, 13); addSolid(x, 13, 1.2, 3, 0.95); }
+  ceilingLight(-9, 1, 6, { light: true, i: 12, dist: 22, color: 0xd8f0ff }); ceilingLight(9, 1, 6, { light: true, i: 12, dist: 22, color: 0xd8f0ff, mode: 'flicker' }); ceilingLight(0, 10, 6); ceilingLight(0, -6, 6);
+  // west wing: specimen storage
+  room(-40, -18, -4, 10, 4, L.floor, { e: [[-4, 10]] });
+  for (const z of [-1, 7]) for (const x of [-37, -31, -25]) { const n = Math.floor(2.4 / 0.22), geo = new THREE.CylinderGeometry(0.02, 0.02, 2.2, 4), im = new THREE.InstancedMesh(geo, L.steel, n * 2), o = new THREE.Object3D(); for (let i = 0; i < n; i++) for (const sz of [-1.2, 1.2]) { o.position.set(x - 1.2 + i * 0.22, 1.1, z + sz); o.updateMatrix(); im.setMatrixAt(i * 2 + (sz > 0 ? 1 : 0), o.matrix); } world.add(im); meshAt(new THREE.BoxGeometry(2.6, 0.1, 2.6), L.steel, x, 2.25, z); addSolid(x, z, 2.6, 2.6, 2.3); }
+  ceilingLight(-29, 3, 4, { light: true, i: 7, dist: 14, color: 0xff4030, mode: 'pulse' });
+  // east wing: control room
+  room(18, 40, -4, 10, 4, L.floor, { w: [[-4, 10]] });
+  console2(30, -2.5, 0); console2(34, -2.5, 0); console2(26, -2.5, 0);
+  for (const x of [24, 28, 32, 36]) { meshAt(new THREE.BoxGeometry(1, 2.2, 0.8), L.dark, x, 1.1, 9.3); meshAt(new THREE.BoxGeometry(0.8, 0.05, 0.02), L.screen, x, 1.6, 8.88, world, false); } addSolid(30, 9.3, 13, 0.8, 2.2);
+  ceilingLight(30, 3, 4, { light: true, i: 8, dist: 14, color: 0xc8e0ff });
+  // corridor to the containment core
+  floorCeil(-3, 3, -16, -10, 4, L.grate); wallLine('z', -3, -16, -10, 4); wallLine('z', 3, -16, -10, 4);
+  groundPlane(0, -10.6, 6, 0.5, L.stripe, 1, 0.03); ceilingLight(0, -13, 4, { mode: 'flicker' });
+  // containment core (final boss arena): the broken tank the outbreak came from
+  room(-22, 22, -43, -16, 10, L.grate, { s: [[-3, 3]] });
+  meshAt(new THREE.CylinderGeometry(3.4, 3.6, 0.6, 16), L.steel, 0, 0.3, -30); meshAt(new THREE.CylinderGeometry(3.4, 3.4, 0.5, 16), L.steel, 0, 8.6, -30);
+  for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2, hgt = i % 3 === 0 ? 7.8 : rand(0.8, 3.5); meshAt(new THREE.BoxGeometry(0.2, hgt, 0.2), L.steel, Math.cos(a) * 3.2, hgt / 2 + 0.6, -30 + Math.sin(a) * 3.2); }
+  { const pool = meshAt(new THREE.CircleGeometry(5.5, 20), L.liquid, 0, 0.04, -30, world, false); pool.rotation.x = -Math.PI / 2; }
+  addSolid(0, -30, 6.6, 6.6, 8.8);
+  for (let i = 0; i < 4; i++) { const m = meshAt(new THREE.CylinderGeometry(0.3, 0.3, 9, 8), L.dark, -20 + i * 1.0, 4.5, -42.4, world, false); void m; }
+  for (const sx of [-1, 1]) { const m = meshAt(new THREE.CylinderGeometry(0.35, 0.35, 18, 8), L.dark, sx * 21.5, 8.5, -30, world, false); m.rotation.x = Math.PI / 2; }
+  for (const x of [-14, 14]) for (const z of [-22, -38]) { meshAt(new THREE.BoxGeometry(1.2, 10, 1.2), L.steel, x, 5, z); addSolid(x, z, 1.2, 1.2, 10); }
+  console2(-18, -20, Math.PI / 2); console2(18, -40, -Math.PI / 2);
+  { const g = new THREE.PointLight(0x40ff80, 18, 26, 1.4); g.position.set(0, 2.5, -30); world.add(g); }
+  ceilingLight(-9, -24, 10, { light: true, i: 12, dist: 24, color: 0xd8f0ff, mode: 'flicker' }); ceilingLight(9, -36, 10, { light: true, i: 10, dist: 22, color: 0xff4030, mode: 'pulse' });
+  // clutter
+  [[-12, 29.5], [12.5, 18], [-16, -8], [38, 8], [-20, -41.5]].forEach(p => crate(...p));
+  [[16.5, -8.5], [-38.5, 8.5], [20.5, -41.5], [-20.5, -18]].forEach(p => redBarrel(...p));
+  for (let i = 0; i < 50; i++) { const p = meshAt(new THREE.PlaneGeometry(0.22, 0.3), I.paper, rand(-16, 16), 0.03, rand(-9, 30), world, false); p.rotation.x = -Math.PI / 2; p.rotation.z = rand(0, 6); }
+  for (let i = 0; i < 14; i++) addDecal(rand(-16, 16), rand(-40, 30), rand(0.6, 1.6));
+}
+
 // ---- stage table ----
 const STAGES = {
   village: {
@@ -1607,7 +1842,7 @@ const STAGES = {
       { title: 'CITY 1', sub: '燃える大通り', atmos: 'cityFire', total: 11, conc: 5, mix: { zombie: 0.8, cop: 0.2 }, obj: 'ゾンビの群れを食い止めろ' },
       { title: 'CITY 2', sub: '封鎖線', atmos: 'cityNight', total: 15, conc: 7, mix: { zombie: 0.5, cop: 0.25, runner: 0.25 }, obj: '走ってくるゾンビに注意しろ' },
       { title: 'CITY 3', sub: '雨の夜', atmos: 'cityRain', total: 19, conc: 8, mix: { zombie: 0.4, cop: 0.2, runner: 0.25, fat: 0.15 }, obj: '巨体のゾンビは足を止めてから仕留めろ', rain: true },
-      { title: 'FINAL', sub: '変異体', atmos: 'cityBoss', total: 10, conc: 4, mix: { zombie: 0.6, runner: 0.4 }, obj: '警察署から現れた変異体を倒せ', boss: true },
+      { title: 'CITY 4', sub: '警察署へ', atmos: 'cityFire', total: 12, conc: 8, mix: { zombie: 0.6, runner: 0.25, cop: 0.15 }, obj: '群れが押し寄せてくる', prologue: true, goal: [0, -31.4], next: 'stationIn' },
     ],
     spawns: [[0, -30], [-3.5, 43], [6.5, 42], [-43, -2], [-43, 4], [43, 4.5], [43, -6], [-23.8, -24], [25.5, -25], [-25.5, 23.6], [24.5, 30], [-4, 43], [-38, 0], [38, 5]],
     boss: 'mutant', bossPos: [0, -30], bossName: '変異体 ― THE ABERRATION', bossShort: '変異体', bossBanner: 'THE ABERRATION',
@@ -1620,7 +1855,7 @@ STAGES.station = {
   waves: [{ title: 'PROLOGUE', sub: '警察署前', atmos: 'cityFire', total: 7, conc: 7, mix: { zombie: 0.75, runner: 0.25 }, obj: '周囲を警戒しろ', prologue: true }],
 };
 STAGES.stationIn = {
-  id: 'stationIn', entry: 'station', build: buildStationInterior, start: [0, 7.5], trader: [-10.1, 4.4], flashlight: true,
+  id: 'stationIn', entry: 'city', build: buildStationInterior, start: [0, 7.5], trader: [-10.1, 4.4], flashlight: true,
   spawns: [[-41, -11], [-41, 11], [-33, 10], [30, -12], [30, 12], [-16, -36], [15, -38], [0, -41], [-36, -22], [35, -22], [-28, 0], [26, 0]],
   waves: [
     { title: 'STATION 1', sub: 'ロビー', atmos: 'indoor', total: 10, conc: 5, mix: { zombie: 0.7, cop: 0.3 }, obj: '署内のゾンビを掃討しろ' },
@@ -1628,14 +1863,39 @@ STAGES.stationIn = {
     { title: 'STATION 3', sub: '留置場の暴動', atmos: 'indoorRed', total: 18, conc: 8, mix: { zombie: 0.35, cop: 0.3, runner: 0.2, fat: 0.15 }, obj: '留置場から溢れ出たゾンビを止めろ' },
     { title: 'FINAL', sub: '地下駐車場', atmos: 'indoor', total: 8, conc: 3, mix: { zombie: 0.6, runner: 0.4 }, obj: '駐車場から現れた変異体を倒せ', boss: true },
   ],
-  boss: 'mutant', bossPos: [0, -38], bossName: '変異体 ― THE ABERRATION', bossShort: '変異体', bossBanner: 'THE ABERRATION',
+  boss: 'mutant', bossPos: [0, -38], arena: [-17.8, 17.8, -42.8, -18.2], arenaDoor: [0, -17], bossName: '変異体 ― THE ABERRATION', bossShort: '変異体', bossBanner: 'THE ABERRATION',
   ending: '警察署を抜け出した。だが、この街で何が起きたのか――',
+};
+STAGES.subway = {
+  id: 'subway', build: buildSubway, start: [0, 39], trader: [9.6, 21.6], flashlight: true,
+  spawns: [[7.5, 35], [6, 33], [-10.5, 18], [10.5, 14], [-11, 10.5], [11, 9], [0, -10.5], [-11, -26], [9, -26], [-3, -41], [5, -41], [-20.5, -29.5], [20.5, -29.5], [-13.5, -11]],
+  waves: [
+    { title: 'SUBWAY 1', sub: '地下道', atmos: 'tunnel', total: 10, conc: 5, mix: { zombie: 0.5, worker: 0.4, cop: 0.1 }, obj: '地下道を抜けて駅へ向かえ' },
+    { title: 'SUBWAY 2', sub: '駅のホーム', atmos: 'tunnel', total: 15, conc: 7, mix: { zombie: 0.4, worker: 0.3, runner: 0.3 }, obj: 'ホームに群がるゾンビを片付けろ' },
+    { title: 'SUBWAY 3', sub: '線路の暗闇', atmos: 'tunnelDark', dim: true, total: 18, conc: 8, mix: { zombie: 0.3, worker: 0.3, runner: 0.25, fat: 0.15 }, obj: '暗いトンネルを、ライトを頼りに進め' },
+    { title: 'FINAL', sub: '車両倉庫', atmos: 'tunnelBoss', total: 8, conc: 3, mix: { worker: 0.6, runner: 0.4 }, obj: '倉庫に潜む掘削者を倒せ', boss: true },
+  ],
+  boss: 'digger', bossPos: [0, -39], arena: [-21.8, 21.8, -42.8, -28.2], arenaDoor: [11, -29], bossName: '掘削者 ― THE DIGGER', bossShort: '掘削者', bossBanner: 'THE DIGGER',
+  ending: '車両倉庫の奥に、封じられた鉄の扉がある――',
+};
+STAGES.lab = {
+  id: 'lab', build: buildLab, start: [0, 39.5], trader: [11.5, 29.5], flashlight: true,
+  spawns: [[-11, 29], [10, 18], [-15, -8], [15.5, -1], [-15, 14], [15, 14], [-37, 3], [-21, 8.5], [37, 3], [21, -2.5], [-19, -40], [19, -34], [-10, -19], [19, -19]],
+  waves: [
+    { title: 'LAB 1', sub: '研究棟入口', atmos: 'lab', total: 10, conc: 5, mix: { sci: 0.6, guard: 0.4 }, obj: '研究所の奥へ進め' },
+    { title: 'LAB 2', sub: '警報', atmos: 'labAlarm', total: 15, conc: 7, mix: { sci: 0.45, guard: 0.3, runner: 0.25 }, obj: '警報の中、押し寄せる職員を退けろ' },
+    { title: 'LAB 3', sub: '培養槽', atmos: 'labDark', dim: true, total: 18, conc: 8, mix: { sci: 0.35, guard: 0.25, runner: 0.25, fat: 0.15 }, obj: '停電した実験区画を突破しろ' },
+    { title: 'FINAL', sub: '発生源', atmos: 'labCore', total: 10, conc: 3, mix: { sci: 0.5, runner: 0.5 }, obj: 'パンデミックの元凶を倒せ', boss: true },
+  ],
+  boss: 'origin', bossPos: [0, -39.5], arena: [-21.8, 21.8, -42.8, -16.2], arenaDoor: [0, -15], bossName: '原初体 ― THE PROGENITOR', bossShort: '原初体', bossBanner: 'THE PROGENITOR',
+  ending: '発生源は沈黙した。地上に、朝の光が差している――',
 };
 let STAGE = STAGES.village;
 function clearWorld() {
   world.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   while (world.children.length) world.remove(world.children[0]);
   solids.length = barrels.length = crates.length = fires.length = policeLights.length = lamps.length = 0;
+  SURF.wall = SURF.ceil = null;
   for (const d of decals) scene.remove(d); decals.length = 0;
 }
 function buildStage(id) {
@@ -1734,6 +1994,9 @@ function zombieLook(c, type, female) {
   if (type === 'cop') { Object.assign(c, { shirt: mat(0x1e2a44), sleeve: mat(0x1e2a44), pants: mat(0x161c2c), vest: mat(0x14161a) }); c.cap = mat(0x10141e); c.hair = null; c.skirt = null; }
   if (type === 'fat') { c.shirt = mat(0xa09a88); c.hair = null; c.skirt = null; c.apron = mat(0x6a6050); }
   if (type === 'runner') { c.shirt = mat(pick([0x8a2a20, 0x2a4a6a, 0xb0a890])); }
+  if (type === 'worker') { Object.assign(c, { shirt: mat(0x3a4048), sleeve: mat(0x3a4048), pants: mat(0x2a3038), vest: mat(0xd06a18), glove: mat(0x4a3a22) }); c.cap = mat(0xd0a020); c.hair = null; c.skirt = null; }
+  if (type === 'sci') { Object.assign(c, { shirt: mat(0xb8bcb6), sleeve: mat(0xc8ccc6), apron: mat(0xc4c8c2), pants: mat(0x30343a) }); if (Math.random() < 0.5) c.glove = mat(0x6a90a0); }
+  if (type === 'guard') { Object.assign(c, { shirt: mat(0x22262a), sleeve: mat(0x22262a), pants: mat(0x16181c), vest: mat(0x2e3238) }); c.cap = mat(0x101214); c.hair = null; c.skirt = null; }
 }
 function makeVillager(type) {
   const female = ((type === 'sickle' || type === 'torch') && Math.random() < 0.55) || ((type === 'zombie' || type === 'runner') && Math.random() < 0.35);
@@ -1752,6 +2015,14 @@ function makeVillager(type) {
   if (t.zombie) zombieLook(c, type, female);
   if (type === 'mutant') {
     Object.assign(c, { shirt: mat(0x7a6670), sleeve: mat(0x7a6670), forearm: mat(0x6a5060), apron: null, vest: null, pants: mat(0x2a2420), skin: mat(0x8a7480), eyes: eyeMat, glove: mat(0x5a3040), boots: mat(0x1a1410) });
+    c.hair = c.cap = c.strawHat = c.scarf = c.skirt = c.hood = null;
+  }
+  if (type === 'digger') {
+    Object.assign(c, { shirt: mat(0x3a3a34), sleeve: mat(0x6a5a50), forearm: mat(0x7a5a5a), vest: mat(0xb05a18), apron: null, pants: mat(0x2a2c30), skin: mat(0x8a7068), eyes: eyeMat, glove: mat(0x3a2a20), boots: mat(0x1a1410) });
+    c.hair = c.strawHat = c.scarf = c.skirt = c.hood = null; c.cap = mat(0xc09020);
+  }
+  if (type === 'origin') {
+    Object.assign(c, { shirt: mat(0xb0a8a8), sleeve: mat(0xc8b8b8), forearm: mat(0xa88890), apron: mat(0x9a9c98), vest: null, pants: mat(0x5a5058), skin: mat(0xd0c4c4), eyes: eyeMatY, glove: mat(0x8a4a58), boots: mat(0x4a3a40) });
     c.hair = c.cap = c.strawHat = c.scarf = c.skirt = c.hood = null;
   }
   if (type === 'boss') {
@@ -1776,6 +2047,20 @@ function makeVillager(type) {
     for (const y of [-0.05, -0.15]) part(h.armR.sh, 0.16, 0.05, 0.16, mat(0x5a3040), 0, y, 0);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffe060 })); eye.position.set(-0.28, 0.55, 0.08); h.torso.add(eye);
   }
+  if (type === 'digger') {
+    // swollen left arm, growths through the work vest, a dented helmet lamp
+    h.armL.sh.scale.set(1.5, 1.2, 1.5);
+    for (let i = 0; i < 7; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(rand(0.06, 0.13), 10, 7), parasiteMat); b.position.set(rand(-0.2, 0.25), rand(0.2, 0.6), rand(-0.12, 0.14)); h.torso.add(b); }
+    const lampM = new THREE.Mesh(boxGeo(0.08, 0.06, 0.04), new THREE.MeshBasicMaterial({ color: 0xfff0b0 })); lampM.position.set(0, 0.17, 0.15); h.head.add(lampM);
+  }
+  if (type === 'origin') {
+    // pale giant: both arms grown into claws, spine of bone, several glowing growths
+    h.armL.sh.scale.set(1.5, 1.35, 1.5); h.armR.sh.scale.set(1.5, 1.35, 1.5);
+    const w2 = npcWeapon('claw'); h.armL.hand.add(w2);
+    for (let i = 0; i < 6; i++) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.22, 6), mat(0xe8dcc8, { rough: 0.4 })); sp.position.set(0, 0.15 + i * 0.09, -0.15); sp.rotation.x = -1.3; h.torso.add(sp); }
+    const glowM = new THREE.MeshBasicMaterial({ color: 0x60ff90 });
+    for (let i = 0; i < 5; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(rand(0.04, 0.08), 8, 6), glowM); b.position.set(rand(-0.2, 0.2), rand(0.1, 0.55), 0.14); h.torso.add(b); }
+  }
   if (t.boss) {
     const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffaa30 }));
     core.position.set(0, 0.35, -0.16); h.torso.add(core); h.core = core;
@@ -1795,6 +2080,13 @@ function makeVillager(type) {
   return h;
 }
 
+// bosses stay inside their arena (STAGE.arena = [x0, x1, z0, z1], the room's inner walls); true when pushed back
+function keepInArena(e) {
+  const a = e.boss && STAGE.arena; if (!a) return false;
+  const r = e.radius, x = clamp(e.pos.x, a[0] + r, a[1] - r), z = clamp(e.pos.z, a[2] + r, a[3] - r);
+  if (x === e.pos.x && z === e.pos.z) return false;
+  e.pos.x = x; e.pos.z = z; return true;
+}
 class Enemy {
   constructor(type, x, z, waveCfg) {
     this.type = type; this.t = ETYPES[type]; this.boss = !!this.t.boss;
@@ -2031,7 +2323,7 @@ class Enemy {
         p.tx = 0.55; p.rsx = -0.8; walkPose(p, this.st * 16, 1.3);
         this.pos.addScaledVector(this.chargeDir, (this.phase2 ? 11 : 9.5) * dt);
         const pre = this.pos.clone(); collide(this.pos, this.radius);
-        const blocked = pre.distanceToSquared(this.pos) > 0.0004 || Math.abs(this.pos.x) >= BOUND || Math.abs(this.pos.z) >= BOUND;
+        const blocked = pre.distanceToSquared(this.pos) > 0.0004 || Math.abs(this.pos.x) >= BOUND || Math.abs(this.pos.z) >= BOUND || keepInArena(this);
         const rel = _b.subVectors(P, this.pos); const ahead = rel.dot(this.chargeDir);
         if (!this.hitThisCharge && ahead > -0.5 && ahead < 1.6 && Math.abs(rel.x * this.chargeDir.z - rel.z * this.chargeDir.x) < 1.3) {
           const r = hurtPlayer(40, this.pos, false, this); if (r) this.hitThisCharge = true; if (r === true) knockPlayer(this.pos, 10); else if (r) knockPlayer(this.pos, 4);
@@ -2054,7 +2346,7 @@ class Enemy {
       if (dist < 2.2 && this.state === 'chase') desire.set(0, 0, 0);
       this.vel.x = damp(this.vel.x, desire.x * speed, 5, dt); this.vel.z = damp(this.vel.z, desire.z * speed, 5, dt);
     } else if (this.state !== 'charge') this.vel.multiplyScalar(Math.max(0, 1 - dt * 6));
-    if (this.state !== 'charge') { this.pos.addScaledVector(this.vel, dt); if (this.state !== 'intro') collide(this.pos, this.radius); }
+    if (this.state !== 'charge') { this.pos.addScaledVector(this.vel, dt); if (this.state !== 'intro') collide(this.pos, this.radius); keepInArena(this); }
     const sp = this.state === 'charge' ? 9 : Math.hypot(this.vel.x, this.vel.z);
     if (this.state === 'chase' || this.state === 'intro') { this.face = dampAng(this.face, this.state === 'intro' ? 0 : toFace, 4, dt); walkPose(p, this.phase, clamp(sp / 1.6, 0, 1)); p.rsx = (p.rsx || 0) - 0.3; p.tx = (p.tx || 0) + 0.15; }
     this.phase += sp * dt * 2.2;
@@ -2168,7 +2460,7 @@ function spawnPickup(at, kind, amount) {
 function dropLoot(pos, type) {
   if (type === 'boss') { spawnPickup(pos, 'treasure', 2); spawnPickup(pos, 'gold', 5000); return; }
   const r = Math.random();
-  if (type === 'cop' && r < 0.5) { spawnPickup(pos, 'ammo'); return; }
+  if ((type === 'cop' || type === 'guard') && r < 0.5) { spawnPickup(pos, 'ammo'); return; }
   if (type === 'brute' || type === 'fat') { spawnPickup(pos, 'treasure'); spawnPickup(pos, 'gold', randi(400, 800)); return; }
   if (r < 0.42) spawnPickup(pos, 'gold', randi(60, 220));
   else if (r < 0.8) spawnPickup(pos, 'ammo');
@@ -2276,21 +2568,26 @@ function updateDirector(dt) {
       }
     }
   } else if (director.phase === 'combat' && w.prologue) {
-    director.proT += dt;
+    director.proT += dt; const goal = w.goal || STAGE.goal;
     if (director.spawned < w.total && alive < w.conc) { director.spawnT -= dt; if (director.spawnT <= 0) { spawnEnemy(pickType(w.mix)); director.spawned++; director.spawnT = rand(0.2, 0.6); } }
     if (!director.goShown) setH('obj', w.obj);
     if (director.proT > 1.2 && !director.ambushShown) { director.ambushShown = true; showBanner('AMBUSH', 'ゾンビの群れだ！'); sfx.groan(player.pos, 0.8); }
     if (director.proT > 5 && !director.goShown) {
-      director.goShown = true; showBanner('', '警察署に入れ！'); marker.position.set(STAGE.goal[0], 0, STAGE.goal[1]); marker.visible = true;
-      setH('obj', '警察署に入れ！（光っている入口へ）'); sfx.bell();
+      director.goShown = true; showBanner('', w.go || '警察署に入れ！'); marker.position.set(goal[0], 0, goal[1]); marker.visible = true;
+      setH('obj', w.goObj || '警察署に入れ！（光っている入口へ）'); sfx.bell();
     }
-    if (director.goShown && Math.hypot(player.pos.x - STAGE.goal[0], player.pos.z - STAGE.goal[1]) < 2.2 && !player.dead) {
+    if (director.goShown && Math.hypot(player.pos.x - goal[0], player.pos.z - goal[1]) < 2.2 && !player.dead) {
       director.phase = 'transition'; director.transT = 0; player.invuln = 3; marker.visible = false; setFade(true);
     }
   } else if (director.phase === 'transition') {
     director.transT += dt;
-    if (director.transT > 1.0) enterStage(STAGE.next);
+    if (director.transT > 1.0) enterStage(w.next || STAGE.next);
   } else if (director.phase === 'combat') {
+    // boss chapters: point the way to the arena while the player is outside it
+    if (w.boss && STAGE.arenaDoor) {
+      const a = STAGE.arena, inside = player.pos.x > a[0] && player.pos.x < a[1] && player.pos.z > a[2] && player.pos.z < a[3];
+      if (!inside !== marker.visible) { marker.visible = !inside; marker.position.set(STAGE.arenaDoor[0], 0, STAGE.arenaDoor[1]); }
+    }
     const limit = w.boss ? (director.boss?.phase2 ? w.total : 2) : w.total;
     if (director.spawned < limit && alive < w.conc) {
       director.spawnT -= dt;
@@ -2301,7 +2598,7 @@ function updateDirector(dt) {
     if (director.boss) $('bossHp').firstElementChild.style.width = `${Math.max(0, director.boss.hp / director.boss.maxHp * 100)}%`;
     const cleared = w.boss ? director.bossDead : (director.spawned >= w.total && alive === 0);
     if (cleared) {
-      if (w.boss) { director.phase = 'ending'; director.introT = 4; $('bossBar').classList.add('hidden'); setMusic('rest'); showBanner(STAGE.bossBanner, '撃破'); }
+      if (w.boss) { director.phase = 'ending'; marker.visible = false; director.introT = 4; $('bossBar').classList.add('hidden'); setMusic('rest'); showBanner(STAGE.bossBanner, '撃破'); }
       else {
         director.phase = 'rest'; const bonus = 800 + director.wave * 600; inv.gold += bonus;
         showBanner('CHAPTER CLEAR', `報酬 ${bonus.toLocaleString()} G`); sfx.cash();

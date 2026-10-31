@@ -111,11 +111,14 @@ body.touch .screen{padding:12px}
 .btn.small{font-size:calc(var(--k)*17px);padding:calc(var(--k)*7px) calc(var(--k)*16px);letter-spacing:.06em;margin:0}
 .btn:disabled{opacity:.35;cursor:default;background:none}
 #stageSel{display:flex;gap:calc(var(--k)*12px);margin-top:calc(var(--k)*18px);flex-wrap:wrap;justify-content:center}
-.stage{pointer-events:auto;cursor:pointer;width:calc(var(--k)*270px);min-width:200px;text-align:left;padding:calc(var(--k)*10px) calc(var(--k)*14px);
+.stage{pointer-events:auto;cursor:pointer;width:calc(var(--k)*200px);min-width:150px;text-align:left;padding:calc(var(--k)*10px) calc(var(--k)*14px);
   background:rgba(40,8,6,.6);border:2px solid var(--line);color:var(--ink);font-family:var(--px);transition:.15s}
 .stage:hover{border-color:var(--gold);background:rgba(120,14,10,.6)}
 .stage b{display:block;font-size:calc(var(--k)*15px);letter-spacing:.2em;color:var(--gold);font-weight:400}
 .stage em{font-style:normal;color:#ff8a6a;margin-left:6px}
+body.touch.landscape .stage{min-width:0;width:calc(25% - 12px);padding:6px 8px}
+body.touch.landscape .stage small{display:none}
+body.touch.landscape .stage span{font-size:15px}
 .stage span{display:block;font-size:calc(var(--k)*26px);letter-spacing:.1em;margin:2px 0 4px}
 .stage small{display:block;font-size:calc(var(--k)*14px);line-height:1.55;color:#cfc2aa}
 #controls{margin-top:calc(var(--k)*10px);font-size:calc(var(--k)*14px);color:#cfc2aa;line-height:1.6;display:grid;grid-template-columns:auto auto auto;background:rgba(0,0,0,.55);padding:4px 12px;gap:0 calc(var(--k)*22px);text-align:left}
@@ -248,8 +251,9 @@ body.touch.landscape #tNext{width:auto!important;height:auto!important}
   </div>
   <div id="stageSel">
     <button class="stage" data-stage="village"><b>STAGE 1</b><span>赤霧の村</span><small>霧に閉ざされた山あいの村。寄生された村人と、教会に潜む処刑人。</small></button>
-    <button class="stage" data-stage="city"><b>STAGE 2 <em>TEST</em></b><span>燃える街</span><small>ウイルスが漏れ出した地方都市。夜の大通りにゾンビがあふれ、警察署から変異体が現れる。</small></button>
-    <button class="stage" data-stage="station"><b>STAGE 3 <em>TEST</em></b><span>警察署</span><small>燃える街の警察署前から始まる。ゾンビの襲撃を切り抜け、署内へ逃げ込め。</small></button>
+    <button class="stage" data-stage="city"><b>STAGE 2 <em>TEST</em></b><span>街・警察署</span><small>村から戻ると、街はゾンビであふれていた。襲撃を耐え抜き、警察署へ。</small></button>
+    <button class="stage" data-stage="subway"><b>STAGE 3 <em>TEST</em></b><span>地下鉄</span><small>警察署から地下道へ。止まった地下鉄のホームとトンネルを抜けて、車両倉庫へ。</small></button>
+    <button class="stage" data-stage="lab"><b>STAGE 4 <em>TEST</em></b><span>地下研究所</span><small>車両倉庫の隠し扉の先。パンデミックの発生源で、元凶と対峙する。</small></button>
   </div>
   <div id="controls">
     <span><b>WASD</b> 移動 / <b>Shift</b> 走る</span><span><b>マウス</b> 視点</span><span><b>右クリック</b> 構える</span>

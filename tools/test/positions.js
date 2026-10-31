@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
     const inside = (x,z,r=0.4) => S.some(s => s.alive && x>s.minX-r && x<s.maxX+r && z>s.minZ-r && z<s.maxZ+r);
     const st = g.stage, N = g.NAV; const out = { solids: S.length, bad: [] };
     const reach = (x,z) => { const i = Math.floor(z - N.org) * N.n + Math.floor(x - N.org); return N.dist[i]; };
-    for (const id of ['village','city','station','stationIn']) {
+    for (const id of ['village','city','station','stationIn','subway','lab']) {
       g.buildStage(id); const st = g.stage; N.t=0;
       const check = (name,x,z) => { const ins = inside(x,z,0.35); /* reach from start */ const d = reach(x,z); if (ins || d < 0) out.bad.push(`${id} ${name} (${x},${z}) inside=${ins} dist=${d}`); };
       check('start', st.start[0], st.start[1]); check('trader', st.trader[0], st.trader[1]); if (st.bossPos) check('boss', st.bossPos[0], st.bossPos[1]+3); if (st.goal) check('goal', st.goal[0], st.goal[1]);
