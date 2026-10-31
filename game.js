@@ -132,6 +132,7 @@ const ATMOS = {
   indoor:     { sky: [0x050505, 0x0a0a0a, 0x050505], fog: 0x0c0c0e, dens: 0.045, hs: 0x8090a0, hg: 0x141210, hi: 0.3, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.45 },
   indoorDark: { sky: [0x020202, 0x040404, 0x020202], fog: 0x050506, dens: 0.06, hs: 0x506070, hg: 0x0a0a0a, hi: 0.12, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.6, vis: 0.45 },
   indoorRed:  { sky: [0x050202, 0x0a0404, 0x050202], fog: 0x140606, dens: 0.05, hs: 0xa05048, hg: 0x140808, hi: 0.22, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.5 },
+  sewer:      { sky: [0x050202, 0x0a0403, 0x050202], fog: 0x1c0c08, dens: 0.04, hs: 0xc0705a, hg: 0x140806, hi: 0.4, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.45 },
   tunnel:     { sky: [0x040403, 0x080806, 0x040403], fog: 0x12120c, dens: 0.045, hs: 0x9a9070, hg: 0x12100a, hi: 0.3, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.45 },
   tunnelDark: { sky: [0x020202, 0x030303, 0x020202], fog: 0x060605, dens: 0.06, hs: 0x5a5a48, hg: 0x0a0a08, hi: 0.12, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.6, vis: 0.45 },
   tunnelBoss: { sky: [0x050302, 0x0a0604, 0x050302], fog: 0x160c08, dens: 0.045, hs: 0xa06a48, hg: 0x140a06, hi: 0.3, sc: 0x000000, si: 0.0, dir: [0, 1, 0], exp: 1.5 },
@@ -681,8 +682,9 @@ function navBuild() {
   const { n, org } = NAV; NAV.blocked.fill(0);
   for (const s of solids) {
     if (!s.alive || s.maxY < 0.5) continue;
-    const x0 = Math.floor(s.minX - 0.45 - org), x1 = Math.floor(s.maxX + 0.45 - org);
-    const z0 = Math.floor(s.minZ - 0.45 - org), z1 = Math.floor(s.maxZ + 0.45 - org);
+    const m = s.navPad ?? 0.45; // thin walls (train cars) pad less so their narrow insides stay walkable
+    const x0 = Math.floor(s.minX - m - org), x1 = Math.floor(s.maxX + m - org);
+    const z0 = Math.floor(s.minZ - m - org), z1 = Math.floor(s.maxZ + m - org);
     for (let z = Math.max(0, z0); z <= Math.min(n - 1, z1); z++) for (let x = Math.max(0, x0); x <= Math.min(n - 1, x1); x++) NAV.blocked[z * n + x] = 1;
   }
 }
@@ -703,12 +705,14 @@ function navDir(pos, out) {
   const { n, org, blocked, dist } = NAV;
   const x = clamp(Math.floor(pos.x - org), 0, n - 1), z = clamp(Math.floor(pos.z - org), 0, n - 1);
   let best = dist[z * n + x]; if (best < 0) best = 1e9;
+  const stuck = blocked[z * n + x]; // standing in a padded cell next to a wall: don't pick a neighbour on the far side of it
   let bx = 0, bz = 0;
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
     if (!dx && !dz) continue;
     const xx = x + dx, zz = z + dz; if (xx < 0 || zz < 0 || xx >= n || zz >= n) continue;
     const k = zz * n + xx; if (blocked[k] || dist[k] < 0) continue;
     if (dx && dz && (blocked[z * n + xx] || blocked[zz * n + x])) continue;
+    if (stuck && !segClear(_nt1.set(pos.x, 0.6, pos.z), _nt2.set(org + xx + 0.5, 0.6, org + zz + 0.5))) continue;
     const dd = dist[k] + (dx && dz ? 0.4 : 0);
     if (dd < best) { best = dd; bx = dx; bz = dz; }
   }
@@ -756,6 +760,25 @@ function rayCapsule(o, d, a, b, r) {
   _p.copy(o).addScaledVector(d, sc); _q.copy(a).addScaledVector(_v, tc);
   const dist = _p.distanceTo(_q); if (dist > r) return Infinity;
   return Math.max(0, sc - Math.sqrt(r * r - dist * dist));
+}
+// clear for a body of radius r walking from (ax,az) to (bx,bz): the centre line and both shoulders
+// (a bare centre line through a doorway made enemies walk into the door frame and stick there)
+const _pc1 = new V3(), _pc2 = new V3();
+function pathClear(ax, az, bx, bz, r, y = 0.6) {
+  const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1, px = -dz / l * r, pz = dx / l * r;
+  return segClear(_pc1.set(ax, y, az), _pc2.set(bx, y, bz)) && segClear(_pc1.set(ax + px, y, az + pz), _pc2.set(bx + px, y, bz + pz)) && segClear(_pc1.set(ax - px, y, az - pz), _pc2.set(bx - px, y, bz - pz));
+}
+// undo a move that would pass through a wall (a hard knockback could carry a body past a thin wall in one frame)
+const _nt1 = new V3(), _nt2 = new V3(), _ntPrev = new V3();
+function noTunnel(prev, pos) {
+  const dx = pos.x - prev.x, dz = pos.z - prev.z, L = Math.hypot(dx, dz);
+  if (L < 0.12) return; // ordinary steps can't skip a wall; only hard knockbacks are checked
+  _nt1.set(prev.x, 0.6, prev.z); _nt2.set(dx / L, 0, dz / L);
+  for (const s of solids) {
+    if (!s.alive || s.maxY < 0.6) continue;
+    if (prev.x > s.minX && prev.x < s.maxX && prev.z > s.minZ && prev.z < s.maxZ) continue; // already overlapping it: let collide sort it out
+    if (rayAABB(_nt1, _nt2, s) < L) { pos.x = prev.x; pos.z = prev.z; return; }
+  }
 }
 function segClear(a, b) {
   _v.subVectors(b, a); const L = _v.length(); _v.divideScalar(L);
@@ -932,6 +955,7 @@ const sfx = {
   },
   step(run) { if (!this.ok()) return; const t = AC.ctx.currentTime, g = AC.ctx.createGain(); env(g, t, 0.003, run ? 0.32 : 0.2, 0.07); g.connect(out(1, rand(-.1, .1), 0)); noise(t, 0.08, g, 700, 200, 'lowpass'); },
   hit(pos) { if (!this.ok()) return; const s = spatial(pos), t = AC.ctx.currentTime, g = AC.ctx.createGain(); env(g, t, 0.003, 0.7, 0.12); g.connect(out(s.vol, s.pan, 0.1)); noise(t, 0.14, g, 1400, 300, 'bandpass', 2); tone(t, 'sine', 180, 60, 0.12, out(s.vol * 0.6, s.pan, 0), 0.5); },
+  splash(pos, big = 0.5) { if (!this.ok()) return; const s = pos ? spatial(pos) : { vol: 1, pan: rand(-.1, .1) }, t = AC.ctx.currentTime, g = AC.ctx.createGain(); env(g, t, 0.01, 0.25 + big * 0.6, 0.15 + big * 0.5); g.connect(out(s.vol, s.pan, 0.15)); noise(t, 0.2 + big * 0.5, g, 900 + big * 700, 150, 'lowpass'); },
   splat(pos) { if (!this.ok()) return; const s = spatial(pos), t = AC.ctx.currentTime, g = AC.ctx.createGain(); env(g, t, 0.003, 1, 0.3); g.connect(out(s.vol, s.pan, 0.2)); noise(t, 0.3, g, 2500, 200, 'lowpass', 3); },
   ping() { if (!this.ok()) return; const t = AC.ctx.currentTime; tone(t, 'triangle', 3200, 2800, 0.15, out(0.2, 0, 0.3), 0.3); },
   wood(pos) { if (!this.ok()) return; const s = spatial(pos), t = AC.ctx.currentTime, g = AC.ctx.createGain(); env(g, t, 0.002, 0.9, 0.25); g.connect(out(s.vol, s.pan, 0.2)); noise(t, 0.25, g, 900, 150, 'bandpass', 1.4); tone(t, 'square', 140, 60, 0.12, out(s.vol * 0.4, s.pan, 0), 0.3); },
@@ -1201,6 +1225,7 @@ const ETYPES = {
   sci:    { hp: 40, speed: 1.35, dmg: 11, range: 1.5, windup: 0.7, recover: 0.75, grab: 0.55, zombie: true },
   guard:  { hp: 72, speed: 1.25, dmg: 15, range: 1.5, windup: 0.7, recover: 0.8, grab: 0.45, zombie: true },
   digger: { hp: 2100, speed: 1.8, dmg: 38, range: 3.8, weapon: 'maul', scale: 1.7, bulk: 1.6, boss: true, coreHue: 0.1 },
+  croc:   { hp: 110, speed: 2.6, dmg: 22, zombie: true },
   origin: { hp: 2600, speed: 2.0, dmg: 40, range: 4.0, weapon: 'claw', scale: 1.9, bulk: 1.45, boss: true, coreHue: 0.3 },
 };
 
@@ -1609,16 +1634,104 @@ function buildStationInterior() {
   stall(-11.1, 6.6, Math.PI / 2);
 }
 
-// ---- STAGE 3: underground passage + subway ----
+// ---- STAGE 3a: sewer maze (waist-deep water, crocodile zombies) ----
+const SEWER_MAZE = ['#####################', '#E..#.....#.........#', '#.#.#.#.###.#.#####.#', '#.#.#.......#.#.....#', '#.#.#.#######.#.#####', '#.#...#.....#.#...#.#', '#.#####.#.##RRR##.#.#', '#.......#.#.RRR.....#', '###.#.#.#.#.RRR##.#.#', '#.#...#.#.#.....#...#', '#.###.#.#.#####.#####', '#.............#.....#', '#.##RRR##.#######.#.#', '#.#.RRR...#.......#.#', '#.#.RRR.###.#####.#.#', '#...#...#...#.....#.#', '#######.#.###.###.#.#', '#...#...#...#...#...#', '#.#.#####.#.###.###.#', '#.#.......#.........#', '###########S#########'];
+const SEW_CELL = 4, SEW_H = 4.6, WATER_Y = 0.85;
+let SEW = null;
+function sewerAssets() {
+  if (SEW) return SEW;
+  const brick = canvasTex(256, (g, s) => {
+    g.fillStyle = '#3a1c14'; g.fillRect(0, 0, s, s);
+    for (let y = 0, r = 0; y < s; y += 16, r++) for (let x = r % 2 ? -16 : 0; x < s; x += 32) { g.fillStyle = pick(['#6a2c1e', '#5a2418', '#7a3424', '#62281c', '#4e2016']); g.fillRect(x + 1, y + 1, 30, 14); }
+    speckle(g, s, 60, ['rgba(20,10,6,.45)', 'rgba(90,70,50,.25)'], 6, 30, 0.15, 0.4);
+    g.fillStyle = 'rgba(30,40,20,.35)'; g.fillRect(0, s * 0.72, s, s * 0.28); // waterline grime
+    g.fillStyle = 'rgba(200,190,160,.15)'; for (let i = 0; i < 5; i++) { const x = rand(0, s); g.fillRect(x, rand(0, s * 0.6), rand(2, 5), rand(30, 90)); }
+  });
+  const mud = canvasTex(128, (g, s) => { g.fillStyle = '#1e1a12'; g.fillRect(0, 0, s, s); speckle(g, s, 1500, ['#16130d', '#2a2418', '#262016'], 0.6, 2, 0.4, 0.9); });
+  const water = canvasTex(256, (g, s) => {
+    g.fillStyle = '#5a5238'; g.fillRect(0, 0, s, s);
+    speckle(g, s, 300, ['#6a6244', '#4a432e', '#78704c'], 2, 9, 0.2, 0.5);
+    g.strokeStyle = 'rgba(230,220,180,.35)'; g.lineWidth = 2; for (let i = 0; i < 30; i++) { g.beginPath(); const x = rand(0, s), y = rand(0, s); g.moveTo(x, y); g.quadraticCurveTo(x + rand(-20, 20), y + rand(6, 20), x + rand(-40, 40), y + rand(10, 30)); g.stroke(); }
+  });
+  SEW = {
+    brick: new THREE.MeshStandardMaterial({ map: brick, roughness: 0.85 }),
+    vault: new THREE.MeshStandardMaterial({ map: brick, roughness: 0.85, side: THREE.DoubleSide }),
+    mud: new THREE.MeshStandardMaterial({ map: mud, roughness: 1 }),
+    water: new THREE.MeshStandardMaterial({ map: water, color: 0xb0a478, roughness: 0.38, metalness: 0.12, transparent: true, opacity: 0.88, emissiveMap: water, emissive: 0x6a5a3a, emissiveIntensity: 0.55 }),
+    pipe: mat(0x5a4a3c, { metal: 0.4, rough: 0.6 }), rust: mat(0x6a3a22, { metal: 0.3, rough: 0.7 }),
+    lamp: new THREE.MeshBasicMaterial({ color: 0xffd8a0 }),
+  };
+  return SEW;
+}
+function buildSewer() {
+  const S = sewerAssets(), G = SEWER_MAZE, N = G.length, org = -(N * SEW_CELL) / 2;
+  const cx = i => org + i * SEW_CELL + SEW_CELL / 2, open = (i, j) => i >= 0 && j >= 0 && i < N && j < N && G[j][i] !== '#';
+  // walls: merge each row's wall cells that touch open water into one box
+  for (let j = 0; j < N; j++) {
+    let run = -1;
+    const flush = end => { if (run < 0) return; const w = (end - run) * SEW_CELL, x = org + run * SEW_CELL + w / 2, z = cx(j); meshAt(scaleBoxUV(new THREE.BoxGeometry(w, SEW_H, SEW_CELL), w, SEW_H, SEW_CELL, 4), S.brick, x, SEW_H / 2, z); addSolid(x, z, w, SEW_CELL, SEW_H); run = -1; };
+    for (let i = 0; i <= N; i++) {
+      let wall = i < N && G[j][i] === '#';
+      if (wall) { let near = false; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) if (open(i + a, j + b)) near = true; wall = near; }
+      if (wall && run < 0) run = i; if (!wall) flush(i);
+    }
+  }
+  const span = N * SEW_CELL;
+  groundPlane(0, 0, span, span, S.mud, 2, 0.01);
+  const wtr = groundPlane(0, 0, span, span, S.water, 4, WATER_Y); wtr.receiveShadow = false;
+  const c = groundPlane(0, 0, span, span, S.vault, 4, SEW_H); c.rotation.x = Math.PI / 2;
+  // brick arches and pipes along the straight runs, hanging lamps here and there
+  const arches = [], pipes = [];
+  let k = 0;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    if (!open(i, j) || G[j][i] === 'R') continue;
+    const ns = open(i, j - 1) && open(i, j + 1) && !open(i - 1, j) && !open(i + 1, j), ew = open(i - 1, j) && open(i + 1, j) && !open(i, j - 1) && !open(i, j + 1);
+    if (!ns && !ew) continue;
+    arches.push([cx(i), cx(j), ew]); if ((k++ % 2) === 0) pipes.push([cx(i), cx(j), ew]);
+  }
+  const o = new THREE.Object3D();
+  const arch = new THREE.InstancedMesh(new THREE.TorusGeometry(1.95, 0.16, 4, 10, Math.PI), S.brick, arches.length);
+  arches.forEach(([x, z, ew], n) => { o.position.set(x, SEW_H - 1.95, z); o.rotation.set(0, ew ? Math.PI / 2 : 0, 0); o.scale.set(1, 1, 1); o.updateMatrix(); arch.setMatrixAt(n, o.matrix); });
+  world.add(arch);
+  const pipe = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.2, SEW_CELL, 8), S.pipe, pipes.length * 2);
+  pipes.forEach(([x, z, ew], n) => { for (const sd of [-1, 1]) { if (ew) { o.position.set(x, 1.15, z + sd * 1.72); o.rotation.set(0, 0, Math.PI / 2); } else { o.position.set(x + sd * 1.72, 1.15, z); o.rotation.set(Math.PI / 2, 0, 0); } o.updateMatrix(); pipe.setMatrixAt(n * 2 + (sd > 0 ? 1 : 0), o.matrix); } });
+  pipe.castShadow = true; world.add(pipe);
+  const lampGeo = new THREE.BoxGeometry(0.3, 0.2, 0.3);
+  arches.forEach(([x, z], n) => { if (n % 3 === 0) { meshAt(lampGeo, S.lamp, x, SEW_H - 0.5, z, world, false); meshAt(new THREE.BoxGeometry(0.03, 0.4, 0.03), S.pipe, x, SEW_H - 0.2, z, world, false); } });
+  // a few real lights: warm along the way, red in the chambers, blue at the exit
+  [[11, 18, 0xffb070], [5, 13, 0xff4a30], [13, 7, 0xff4a30], [9, 11, 0xffb070], [5, 3, 0xffb070], [17, 3, 0xffa060], [17, 17, 0xffb070], [1, 11, 0xff8050], [19, 9, 0xffa060]].forEach(([i, j, col]) => {
+    const l = new THREE.PointLight(col, 9, 15, 1.5); l.position.set(cx(i), SEW_H - 0.8, cx(j)); world.add(l);
+    meshAt(lampGeo, S.lamp, cx(i), SEW_H - 0.4, cx(j), world, false);
+  });
+  // chambers: a sluice gate and a fat vertical pipe
+  for (const [i, j] of [[13, 7], [5, 13]]) {
+    const x = cx(i), z = cx(j);
+    meshAt(new THREE.CylinderGeometry(0.7, 0.7, SEW_H, 10), S.rust, x + 3.6, SEW_H / 2, z - 3.6); addSolid(x + 3.6, z - 3.6, 1.4, 1.4, SEW_H);
+    meshAt(new THREE.BoxGeometry(3, 0.2, 0.2), S.rust, x, 3.4, z + 5.8, world, false); meshAt(new THREE.BoxGeometry(2.6, 1.6, 0.12), S.rust, x, 2.4, z + 5.8, world, false);
+  }
+  // the way in (ladder from the police station) and the way out (door to the subway)
+  const sI = SEWER_MAZE[N - 1].indexOf('S');
+  wallSeg(cx(sI) - 2.2, 42, cx(sI) + 2.2, 42, SEW_H);
+  for (let y = 0.4; y < SEW_H; y += 0.4) meshAt(new THREE.BoxGeometry(0.7, 0.05, 0.05), S.pipe, cx(sI), y, 41.7, world, false);
+  for (const sx of [-0.35, 0.35]) meshAt(new THREE.BoxGeometry(0.06, SEW_H, 0.06), S.pipe, cx(sI) + sx, SEW_H / 2, 41.7, world, false);
+  const ex = cx(1), ez = cx(1);
+  meshAt(new THREE.BoxGeometry(2, 2.6, 0.15), mat(0x3a4448, { metal: 0.6, rough: 0.4 }), ex, 1.3 + WATER_Y, ez - 1.95, world, false);
+  { const s = neonSign('METRO', '#4aa8ff', 2.6); s.position.set(ex, 3.7, ez - 1.9); world.add(s); const l = new THREE.PointLight(0x5aa0ff, 10, 14, 1.4); l.position.set(ex, 3, ez - 0.8); world.add(l); }
+  for (let i = 0; i < 10; i++) addDecal(cx(randi(1, N - 2)), cx(randi(1, N - 2)), rand(0.6, 1.4));
+}
+
+// ---- STAGE 3b: abandoned subway (walk through broken trains, down the tracks, next station, depot) ----
 let SUB = null;
 function subwayAssets() {
   if (SUB) return SUB;
   const tile = canvasTex(256, (g, s) => {
-    g.fillStyle = '#b8b4a4'; g.fillRect(0, 0, s, s);
-    for (let y = 0; y < s * 0.62; y += 16) for (let x = (y / 16) % 2 ? -16 : 0; x < s; x += 32) { g.fillStyle = pick(['#c4c0b0', '#b0ac9c', '#bcb8a8']); g.fillRect(x + 1, y + 1, 30, 14); }
-    const band = s * 0.62; g.fillStyle = '#1e4a3a'; g.fillRect(0, band, s, 10); g.fillStyle = '#2a2c28'; g.fillRect(0, band + 10, s, s - band - 10);
-    speckle(g, s, 40, ['rgba(60,50,30,.35)', 'rgba(20,20,10,.4)'], 6, 30, 0.15, 0.4);
-    g.fillStyle = 'rgba(70,40,20,.35)'; for (let i = 0; i < 6; i++) { const x = rand(0, s); g.fillRect(x, rand(0, band), rand(2, 4), rand(30, 120)); }
+    g.fillStyle = '#c8bc94'; g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s; y += 16) for (let x = (y / 16) % 2 ? -16 : 0; x < s; x += 32) { g.fillStyle = pick(['#d0c49c', '#c0b48c', '#c8bc96']); g.fillRect(x + 1, y + 1, 30, 14); }
+    // arched recesses like an old station wall
+    g.fillStyle = '#8a7e5a'; for (let x = 8; x < s; x += 64) { g.fillRect(x, s * 0.25, 48, s * 0.75); g.beginPath(); g.arc(x + 24, s * 0.25, 24, Math.PI, 0); g.fill(); }
+    g.fillStyle = '#c8bc94'; for (let x = 12; x < s; x += 64) { g.fillRect(x, s * 0.28, 40, s * 0.72); g.beginPath(); g.arc(x + 20, s * 0.28, 20, Math.PI, 0); g.fill(); }
+    g.fillStyle = '#2a2a24'; for (let x = 16; x < s; x += 128) g.fillRect(x, s * 0.4, 32, s * 0.4);
+    speckle(g, s, 50, ['rgba(60,50,30,.35)', 'rgba(20,20,10,.4)'], 6, 30, 0.15, 0.4);
   });
   const concrete = canvasTex(256, (g, s) => {
     g.fillStyle = '#4c4a44'; g.fillRect(0, 0, s, s);
@@ -1627,21 +1740,24 @@ function subwayAssets() {
     g.fillStyle = 'rgba(0,0,0,.35)'; for (let y = 0; y < s; y += 64) g.fillRect(0, y, s, 2);
   });
   const floor = canvasTex(256, (g, s) => {
-    g.fillStyle = '#5a5850'; g.fillRect(0, 0, s, s);
-    for (let y = 0; y < s; y += 64) for (let x = 0; x < s; x += 64) { g.fillStyle = pick(['#625f56', '#57554d', '#5e5b52']); g.fillRect(x + 1, y + 1, 62, 62); }
-    speckle(g, s, 1500, ['#4a4840', '#6a675e'], 0.5, 1.4, 0.3, 0.7); speckle(g, s, 10, ['rgba(60,10,8,.5)'], 6, 18, 0.3, 0.6);
+    g.fillStyle = '#6a6656'; g.fillRect(0, 0, s, s);
+    for (let y = 0; y < s; y += 64) for (let x = 0; x < s; x += 64) { g.fillStyle = pick(['#726e5c', '#666250', '#6e6a58']); g.fillRect(x + 1, y + 1, 62, 62); }
+    speckle(g, s, 1500, ['#5a5648', '#7a7664'], 0.5, 1.4, 0.3, 0.7); speckle(g, s, 10, ['rgba(60,10,8,.5)'], 6, 18, 0.3, 0.6);
   });
   const ballast = canvasTex(256, (g, s) => { g.fillStyle = '#34312c'; g.fillRect(0, 0, s, s); speckle(g, s, 6000, ['#2a2722', '#46423b', '#3c3832', '#22201c'], 0.8, 2.4, 0.5, 1); });
-  const ceil = canvasTex(256, (g, s) => { g.fillStyle = '#2c2b27'; g.fillRect(0, 0, s, s); speckle(g, s, 2000, ['#24231f', '#36342f'], 0.5, 1.5, 0.3, 0.8); g.fillStyle = '#1a1916'; for (let i = 0; i <= s; i += 128) g.fillRect(i, 0, 6, s); });
+  const vault = canvasTex(256, (g, s) => { g.fillStyle = '#9a9478'; g.fillRect(0, 0, s, s); speckle(g, s, 2000, ['#8a8468', '#a8a286', '#7a7458'], 0.5, 2, 0.2, 0.6); speckle(g, s, 30, ['rgba(60,50,30,.35)'], 8, 40, 0.15, 0.35); });
   SUB = {
-    tile: new THREE.MeshStandardMaterial({ map: tile, roughness: 0.4 }),
+    tile: new THREE.MeshStandardMaterial({ map: tile, roughness: 0.5 }),
     concrete: new THREE.MeshStandardMaterial({ map: concrete, roughness: 0.95 }),
     floor: new THREE.MeshStandardMaterial({ map: floor, roughness: 0.7 }),
     ballast: new THREE.MeshStandardMaterial({ map: ballast, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }),
-    ceil: new THREE.MeshStandardMaterial({ map: ceil, roughness: 1, side: THREE.DoubleSide }),
+    vault: new THREE.MeshStandardMaterial({ map: vault, roughness: 0.9, side: THREE.DoubleSide }),
+    ceil: new THREE.MeshStandardMaterial({ map: vault, roughness: 1, side: THREE.DoubleSide }),
     rail: mat(0x8a8680, { metal: 0.8, rough: 0.35 }), sleeper: mat(0x2c2620), pipe: mat(0x4a4038, { metal: 0.4, rough: 0.6 }),
-    stripe: mat(0xc8a020, { rough: 0.6 }), body: mat(0x8a8e90, { metal: 0.5, rough: 0.45 }), band: mat(0x1e5a8a, { rough: 0.5 }),
+    stripe: mat(0xc8a020, { rough: 0.6 }), body: mat(0x8e9294, { metal: 0.55, rough: 0.4 }), inner: mat(0xa8aca4, { rough: 0.6 }), seat: mat(0x6a4a2a, { rough: 0.7 }),
+    beam: mat(0x2a2a26, { metal: 0.5, rough: 0.6 }),
     win: new THREE.MeshStandardMaterial({ color: 0x0a0e12, roughness: 0.15, metalness: 0.6, emissive: 0x18242a, emissiveIntensity: 0.6 }),
+    strip: new THREE.MeshStandardMaterial({ color: 0x202020, emissive: 0xf0f4e0, emissiveIntensity: 1.2 }),
   };
   return SUB;
 }
@@ -1654,77 +1770,119 @@ function track(x, z0, z1) {
   for (let i = 0; i < n; i++) { o.position.set(x, 0.05, z0 + 0.4 + i * 0.75); o.updateMatrix(); im.setMatrixAt(i, o.matrix); }
   im.receiveShadow = true; world.add(im);
 }
-// a parked subway car along Z
+// cab face of a car (headlights, windows, an out-of-service sign); dir = +1 faces +z, -1 faces -z
+function carFace(g, len, dir, lit) {
+  const S = subwayAssets(), z = dir * (len / 2 + 0.01), ry = dir > 0 ? 0 : Math.PI;
+  for (const [x, w] of [[-0.85, 0.8], [0.85, 0.8], [0, 0.6]]) { const m = meshAt(new THREE.PlaneGeometry(w, x ? 0.75 : 1.6), S.win, x, x ? 2.05 : 1.6, z, g, false); m.rotation.y = ry; }
+  if (lit) for (const x of [-0.9, 0.9]) { const m = meshAt(new THREE.CircleGeometry(0.11, 8), new THREE.MeshBasicMaterial({ color: 0xfff0c0 }), x, 0.95, z + dir * 0.01, g, false); m.rotation.y = ry; }
+  const sg = neonSign('回送', '#e8f0ff', 0.7); sg.position.set(0.85, 2.05, z + dir * 0.02); sg.rotation.y = ry; g.add(sg);
+}
+// a parked (closed) car along Z
 function trainCar(x, z, len, o = {}) {
   const S = subwayAssets(), g = new THREE.Group(); g.position.set(x, 0, z); world.add(g);
-  meshAt(new THREE.BoxGeometry(2.8, 2.9, len), S.body, 0, 1.75, 0, g);
+  meshAt(new THREE.BoxGeometry(3.0, 2.9, len), S.body, 0, 1.75, 0, g);
   meshAt(new THREE.BoxGeometry(2.6, 0.3, len - 0.4), mat(0x1a1a1c), 0, 0.15, 0, g);
+  for (const sx of [-1, 1]) for (let k = -len / 2 + 1.6; k < len / 2 - 1; k += 2.4)
+    meshAt(new THREE.BoxGeometry(0.02, Math.round(k / 2.4) % 3 === 0 ? 2.0 : 0.8, Math.round(k / 2.4) % 3 === 0 ? 1.2 : 1.6), Math.round(k / 2.4) % 3 === 0 ? mat(0x6a6e70, { metal: 0.5, rough: 0.5 }) : S.win, sx * 1.51, Math.round(k / 2.4) % 3 === 0 ? 1.3 : 2.05, k, g, false);
+  carFace(g, len, 1, o.lights); carFace(g, len, -1, false);
+  addSolid(x, z, 3.0, len, 3.2);
+}
+// a broken car you can walk through: side walls with door openings, open (torn) ends, seats and poles inside
+function walkCar(x, z, len, o = {}) {
+  const S = subwayAssets(), g = new THREE.Group(); g.position.set(x, 0, z); world.add(g);
+  const W = 3.2, H = 2.75, doors = o.doors || [], z0 = z - len / 2;
+  meshAt(new THREE.BoxGeometry(W, 0.12, len), S.inner, 0, H + 0.06, 0, g);              // roof
+  meshAt(new THREE.BoxGeometry(W, 0.08, len), mat(0x3a3832), 0, 0.04, 0, g, false);       // floor
   for (const sx of [-1, 1]) {
-    meshAt(new THREE.BoxGeometry(0.02, 0.22, len), S.band, sx * 1.41, 1.15, 0, g, false);
-    for (let k = -len / 2 + 1.6; k < len / 2 - 1; k += 2.4) {
-      if (Math.round(k / 2.4) % 3 === 0) meshAt(new THREE.BoxGeometry(0.02, 2.0, 1.2), mat(0x6a6e70, { metal: 0.5, rough: 0.5 }), sx * 1.415, 1.3, k, g, false);
-      else meshAt(new THREE.BoxGeometry(0.02, 0.8, 1.6), S.win, sx * 1.415, 2.05, k, g, false);
+    const gaps = sx < 0 ? doors.map(d => d + len / 2) : [];
+    let s = 0; const cuts = [...gaps.map(d => [d - 0.7, d + 0.7]), [len, len]];
+    for (const [a, b] of cuts) {
+      if (a > s) {
+        const L = a - s, cz = s + L / 2 - len / 2;
+        meshAt(new THREE.BoxGeometry(0.1, H, L), S.body, sx * (W / 2 - 0.05), H / 2, cz, g);
+        meshAt(new THREE.BoxGeometry(0.02, 0.8, L - 0.4), o.broken && Math.random() < 0.4 ? mat(0x111416) : S.win, sx * (W / 2 + 0.01), 1.9, cz, g, false);
+        meshAt(new THREE.BoxGeometry(0.45, 0.45, L - 0.3), S.seat, sx * (W / 2 - 0.35), 0.45, cz, g, false);
+        addSolid(x + sx * (W / 2 - 0.05), z0 + s + L / 2, 0.12, L, H, { navPad: 0 });
+      }
+      s = Math.max(s, b);
     }
   }
-  for (const sz of [-1, 1]) { meshAt(new THREE.BoxGeometry(1.4, 0.9, 0.02), S.win, 0, 2.1, sz * (len / 2 + 0.01), g, false); if (o.lights) for (const lx of [-0.9, 0.9]) meshAt(new THREE.BoxGeometry(0.2, 0.12, 0.03), new THREE.MeshBasicMaterial({ color: sz > 0 ? 0xfff0c0 : 0xff2010 }), lx, 0.9, sz * (len / 2 + 0.02), g, false); }
-  addSolid(x, z, 2.8, len, 3.2);
+  for (let k = -len / 2 + 2; k < len / 2 - 1; k += 3) for (const sx of [-0.7, 0.7]) meshAt(new THREE.CylinderGeometry(0.025, 0.025, H, 5), S.rail, sx, H / 2, k, g, false);
+  for (let k = -len / 2 + 1.5; k < len / 2 - 1; k += 2.5) { const m = meshAt(new THREE.BoxGeometry(0.2, 0.04, 1.6), S.strip, 0, H - 0.04, k, g, false); if (o.dark && Math.random() < 0.6) m.material = mat(0x1a1a1a); else lamps.push({ light: null, base: 0, mode: 'flicker', mesh: m, t: rand(0, 9) }); }
+  if (o.closedEnd) { const ez = o.closedEnd * (len / 2 - 0.05); meshAt(new THREE.BoxGeometry(W, H, 0.1), S.body, 0, H / 2, ez, g); addSolid(x, z + ez, W, 0.12, H); carFace(g, len, o.closedEnd, false); }
+  for (let i = 0; i < 6; i++) { const p = meshAt(new THREE.PlaneGeometry(0.22, 0.3), stationAssets().paper, rand(-1, 1), 0.1, rand(-len / 2, len / 2), g, false); p.rotation.x = -Math.PI / 2; p.rotation.z = rand(0, 6); }
+  return g;
 }
-function pipeRun(x, z0, z1, y, r = 0.12) {
-  const S = subwayAssets(), m = meshAt(new THREE.CylinderGeometry(r, r, z1 - z0, 8), S.pipe, x, y, (z0 + z1) / 2, world, false); m.rotation.x = Math.PI / 2;
+// barrel-vaulted ceiling along Z over x0..x1, springing from height y
+function vaultZ(x0, x1, z0, z1, y, flat = 0.4) {
+  const S = subwayAssets(), r = (x1 - x0) / 2, L = z1 - z0;
+  const m = meshAt(new THREE.CylinderGeometry(r, r, L, 16, Math.max(1, Math.round(L / 8)), true, Math.PI / 2, Math.PI), S.vault, (x0 + x1) / 2, y, (z0 + z1) / 2, world, false);
+  m.rotation.x = Math.PI / 2; m.scale.z = flat; m.receiveShadow = true;
+}
+// steel I-beam columns with a rail fence between them (the far side of a platform)
+function beamFence(x, z0, z1, h) {
+  const S = subwayAssets();
+  for (let z = z0 + 1; z < z1; z += 2.5) { meshAt(new THREE.BoxGeometry(0.3, h, 0.25), S.beam, x, h / 2, z); meshAt(new THREE.BoxGeometry(0.06, h, 0.45), S.beam, x, h / 2, z); }
+  for (const y of [0.6, 1.4]) meshAt(new THREE.BoxGeometry(0.06, 0.08, z1 - z0), S.beam, x, y, (z0 + z1) / 2, world, false);
+  addSolid(x, (z0 + z1) / 2, 0.3, z1 - z0, h);
+}
+function rubble(x, z, w, d, h) {
+  const C = subwayAssets();
+  for (let i = 0; i < 14; i++) { const s = rand(0.4, 1.3), m = meshAt(new THREE.BoxGeometry(s, s * rand(0.4, 0.9), s), i % 3 ? C.concrete : C.tile, x + rand(-w / 2, w / 2), rand(0.1, h * 0.6), z + rand(-d / 2, d / 2)); m.rotation.set(rand(-0.5, 0.5), rand(0, 3), rand(-0.5, 0.5)); }
+  addSolid(x, z, w, d, h);
 }
 function buildSubway() {
   const S = subwayAssets(), I = stationAssets();
-  // maintenance passage down from the police station (start)
-  SURF.wall = S.concrete; SURF.ceil = S.ceil;
-  floorCeil(-2, 2, 24, 42, 3.4, S.floor); wallLine('z', -2, 24, 42, 3.4); wallLine('z', 2, 24, 42, 3.4, [[27, 37]]); wallSeg(-2.2, 42, 2.2, 42, 3.4);
-  for (const y of [2.6, 2.95]) pipeRun(-1.7, 24, 42, y);
-  ceilingLight(0, 38, 3.4, { light: true, i: 6, dist: 12 }); ceilingLight(0, 28, 3.4, { mode: 'flicker' });
-  // pump room off the passage
-  room(2, 13, 27, 37, 3.6, S.floor, { w: [[30, 34]] });
-  for (const z of [29, 35]) { const t = meshAt(new THREE.CylinderGeometry(1, 1, 2.4, 12), S.pipe, 10.5, 1.2, z); void t; addSolid(10.5, z, 2, 2, 2.4); }
-  meshAt(new THREE.BoxGeometry(1.6, 1.4, 1), I.steel, 6, 0.7, 28); addSolid(6, 28, 1.6, 1, 1.4);
-  for (const y of [2.8, 3.1]) { const m = meshAt(new THREE.CylinderGeometry(0.1, 0.1, 11, 8), S.pipe, 7.5, y, 36.6, world, false); m.rotation.z = Math.PI / 2; }
-  ceilingLight(7.5, 32, 3.6, { light: true, color: 0xff4020, i: 6, dist: 12, mode: 'pulse' });
-  // ticket hall
-  SURF.wall = S.tile;
-  room(-12, 12, 12, 24, 4.5, S.floor, { s: [[-2, 2]], n: [[-3, 3]] });
-  for (let x = -10.5; x <= 10.5; x += 2.6) if (Math.abs(x) > 1.5) { meshAt(new THREE.BoxGeometry(0.35, 1.0, 1.3), I.steel, x, 0.5, 16.5); addSolid(x, 16.5, 0.35, 1.3, 1.0); }
-  meshAt(new THREE.BoxGeometry(4, 2.4, 2.2), mat(0x2a3a44, { rough: 0.6 }), -9.6, 1.2, 21.6); addSolid(-9.6, 21.6, 4, 2.2, 2.4);
-  meshAt(new THREE.BoxGeometry(3.6, 0.9, 0.02), S.win, -9.6, 1.7, 20.48, world, false);
-  { const s = neonSign('METRO', '#5ab8ff', 4); s.position.set(0, 3.6, 12.25); world.add(s); }
-  { const b = meshAt(new THREE.PlaneGeometry(3, 1.6), mat(0xd8d4c4), 6, 2.3, 23.78, world, false); b.rotation.y = Math.PI; for (let i = 0; i < 4; i++) { const l = meshAt(new THREE.PlaneGeometry(2.6, 0.05), mat(pick([0xc03020, 0x2060a0, 0x30a050, 0xc0a020])), 6, 1.8 + i * 0.3, 23.77, world, false); l.rotation.y = Math.PI; } }
-  ceilingLight(-6, 19, 4.5, { light: true, i: 10, dist: 18 }); ceilingLight(6, 19, 4.5, { mode: 'flicker' }); ceilingLight(0, 14, 4.5);
-  // platform hall: two tracks either side of an island platform
-  room(-16, 16, -12, 12, 6, S.floor, { s: [[-12.2, 12.2]], n: [[-15, -7], [7, 15]] });
-  track(-11, -43, 12); track(11, -43, 12);
-  for (const sx of [-1, 1]) groundPlane(sx * 7.75, 0, 0.35, 24, S.stripe, 1, 0.03);
-  for (const x of [-4, 4]) for (const z of [-8, -1, 6]) { meshAt(new THREE.BoxGeometry(0.8, 6, 0.8), S.tile, x, 3, z); addSolid(x, z, 0.8, 0.8, 6); }
-  for (const z of [-4.5, 2.5]) { meshAt(new THREE.BoxGeometry(0.5, 0.45, 2), I.steel, 0, 0.3, z); addSolid(0, z, 0.5, 2, 0.5); }
-  trainCar(-11, 1.5, 13, { lights: true });
-  for (const sx of [-1, 1]) { const s = neonSign('CENTRAL', '#e8e0c0', 5); s.position.set(sx * 15.78, 3.4, sx * 4); s.rotation.y = -sx * Math.PI / 2; world.add(s); }
-  ceilingLight(0, -6, 6, { light: true, i: 12, dist: 22 }); ceilingLight(0, 6, 6, { light: true, i: 12, dist: 22, mode: 'flicker' });
-  ceilingLight(11, -8, 6); ceilingLight(-11, 9, 6, { off: true });
-  // track tunnels north to the depot
+  SURF.wall = S.tile; SURF.ceil = S.ceil;
+  // ---- abandoned station A: platform on the west, the broken train on the track, beams to the east ----
+  groundPlane(-6, 28, 16, 28, S.floor, 2, 0.01); groundPlane(5, 28, 6, 28, S.ballast, 2, 0.01); // the far track behind the beams
+  wallLine('z', -14, 14, 42, 4); wallLine('z', 8, 14, 42, 4); wallSeg(-14.2, 42, 8.2, 42, 4);
+  wallLine('x', 14, -14.2, -3, 4); wallLine('x', 14, 3, 8.2, 4);
+  vaultZ(-14, 8, 14, 42, 4, 0.3); track(5, 14, 42);
+  track(0, -26, 41.8);
+  groundPlane(-2.25, 28, 0.35, 28, S.stripe, 1, 0.03);
+  beamFence(1.85, 14, 42, 4);
+  walkCar(0, 34.8, 13.6, { doors: [-4.2, 1.2, 4.6], closedEnd: 1, broken: true });
+  walkCar(0, 20.5, 13.6, { doors: [-4.6, 2.2], broken: true, dark: true });
+  for (const sx of [-1, 1]) { meshAt(new THREE.BoxGeometry(0.1, 2.6, 0.9), mat(0x1a1a1a), sx * 1.5, 1.35, 27.65); addSolid(sx * 1.5, 27.65, 0.12, 0.9, 2.6, { navPad: 0 }); } // gangway bellows
+  rubble(-7.8, 15.6, 12.4, 3.2, 3.2);
+  for (const z of [22, 30, 38]) { meshAt(new THREE.BoxGeometry(0.6, 0.9, 0.6), mat(0x1a1a1a), -12.8, 0.45, z); addSolid(-12.8, z, 0.6, 0.6, 0.9); }
+  { const b = meshAt(new THREE.BoxGeometry(3, 0.7, 0.12), mat(0x111111), -7, 3.4, 30); void b; meshAt(new THREE.BoxGeometry(0.06, 1.4, 0.06), S.beam, -8, 4.1, 30, world, false); meshAt(new THREE.BoxGeometry(0.06, 1.4, 0.06), S.beam, -6, 4.1, 30, world, false); }
+  for (const sx of [-1]) { const s = neonSign('CENTRAL', '#e8e0c0', 4); s.position.set(-13.78, 2.6, 33); s.rotation.y = Math.PI / 2; world.add(s); void sx; }
+  ceilingLight(-8, 38, 4.4, { light: true, i: 9, dist: 16, color: 0xf0f0c8 }); ceilingLight(-8, 24, 4.4, { light: true, i: 7, dist: 14, color: 0xf0f0c8, mode: 'flicker' }); ceilingLight(-8, 31, 4.4, { off: true });
+  // ---- tunnel 1 (on the tracks) ----
   SURF.wall = S.concrete;
-  for (const cx of [-11, 11]) {
-    floorCeil(cx - 4, cx + 4, -28, -12, 5, S.floor); wallLine('z', cx - 4, -28, -12, 5); wallLine('z', cx + 4, -28, -12, 5);
-    pipeRun(cx - 3.7, -28, -12, 3.8, 0.15);
-    ceilingLight(cx, -20, 5, { light: true, color: 0xff3020, i: 6, dist: 10, mode: 'pulse' });
-  }
-  meshAt(new THREE.BoxGeometry(1.6, 1.2, 2.6), mat(0x8a6a20, { metal: 0.4, rough: 0.6 }), 13, 0.75, -17); addSolid(13, -17, 1.6, 2.6, 1.3);
-  // train depot (boss arena) with the sealed door to the lab
-  room(-22, 22, -43, -28, 8, S.floor, { s: [[-15, -7], [7, 15]] });
-  track(-18, -43, -30); track(18, -43, -30); track(0, -43, -34);
-  trainCar(-18, -36.5, 11); trainCar(18, -37, 11);
-  for (const x of [-6, 6]) { meshAt(new THREE.BoxGeometry(1, 8, 1), S.concrete, x, 4, -34); addSolid(x, -34, 1, 1, 8); }
+  groundPlane(0, 5, 6, 18, S.floor, 2, 0.01); wallLine('z', -3, -4, 14, 3.4); wallLine('z', 3, -4, 14, 3.4); vaultZ(-3, 3, -4, 14, 3.4, 0.5);
+  pipeRun(-2.7, -4, 14, 2.6, 0.12);
+  ceilingLight(0, 9, 4.6, { light: true, color: 0xff3020, i: 5, dist: 10, mode: 'pulse' }); ceilingLight(0, 1, 4.6, { off: true });
+  meshAt(new THREE.BoxGeometry(1.4, 1.1, 2.4), mat(0x8a6a20, { metal: 0.4, rough: 0.6 }), 1.6, 0.6, 4); addSolid(1.6, 4, 1.4, 2.4, 1.2);
+  // ---- station B: platforms on both sides of the track ----
+  SURF.wall = S.tile;
+  groundPlane(0, -12, 24, 16, S.floor, 2, 0.01);
+  wallLine('x', -4, -12.2, 12.2, 4, [[-3, 3]]); wallLine('x', -20, -12.2, 12.2, 4, [[-3, 3]]); wallLine('z', -12, -20, -4, 4); wallLine('z', 12, -20, -4, 4);
+  vaultZ(-12, 12, -20, -4, 4, 0.3);
+  for (const sx of [-1, 1]) { groundPlane(sx * 2.25, -12, 0.35, 16, S.stripe, 1, 0.03); for (const z of [-17, -12, -7]) { meshAt(new THREE.BoxGeometry(0.7, 4, 0.7), S.tile, sx * 7, 2, z); addSolid(sx * 7, z, 0.7, 0.7, 4); } }
+  for (const z of [-15, -9]) { meshAt(new THREE.BoxGeometry(1.8, 0.45, 0.5), I.steel, -10.5, 0.3, z); addSolid(-10.5, z, 1.8, 0.5, 0.5); }
+  { const st = new THREE.Group(); st.position.set(10, 0, -18.5); world.add(st); for (let i = 0; i < 8; i++) meshAt(new THREE.BoxGeometry(2.8, 0.2, 0.3), S.concrete, 0, 0.1 + i * 0.22, -i * 0.3 + 0.9, st); addSolid(10, -18.5, 3, 2.4, 1.8); }
+  { const s = neonSign('NORTH YARD', '#e8e0c0', 5); s.position.set(-11.78, 2.6, -12); s.rotation.y = Math.PI / 2; world.add(s); }
+  ceilingLight(-7, -12, 5.2, { light: true, i: 8, dist: 16, color: 0xf0f0c8, mode: 'flicker' }); ceilingLight(7, -12, 5.2, { light: true, i: 6, dist: 14, color: 0xf0f0c8 });
+  // ---- tunnel 2 to the depot ----
+  SURF.wall = S.concrete;
+  groundPlane(0, -23, 6, 6, S.floor, 2, 0.01); wallLine('z', -3, -26, -20, 3.4); wallLine('z', 3, -26, -20, 3.4); vaultZ(-3, 3, -26, -20, 3.4, 0.5);
+  // ---- depot: four cars side by side (boss arena), the sealed door to the lab at the back ----
+  room(-24, 24, -43, -26, 9, S.floor, { s: [[-3, 3]] });
+  for (const x of [-15, -5, 5, 15]) { track(x, -42.8, -27); trainCar(x, -36.5, 11, { lights: x === -5 || x === 15 }); }
   meshAt(new THREE.BoxGeometry(5, 4.4, 0.3), mat(0x4a4e52, { metal: 0.6, rough: 0.4 }), 0, 2.2, -42.65);
   for (let i = -4; i <= 4; i++) { const st = meshAt(new THREE.BoxGeometry(0.4, 0.1, 0.02), i % 2 ? S.stripe : mat(0x111111), i * 0.5, 4.5, -42.48, world, false); st.rotation.z = 0.6; }
-  ceilingLight(-9, -35, 8, { light: true, i: 14, dist: 24, color: 0xffd8a0 }); ceilingLight(9, -35, 8, { light: true, i: 14, dist: 24, mode: 'flicker' }); ceilingLight(0, -30, 8);
+  ceilingLight(-10, -30, 9, { light: true, i: 24, dist: 30, color: 0xffd8a0 }); ceilingLight(10, -38, 9, { light: true, i: 22, dist: 30, mode: 'flicker' }); ceilingLight(0, -36, 9, { light: true, i: 16, dist: 24, color: 0xffd8a0 });
   // clutter
-  [[-12, -41], [14, -41.5], [9.5, 34.5], [-10.5, 13.5], [-6, -41.5]].forEach(p => crate(...p));
-  [[-13, -41.5], [13.5, -29.5], [4.5, 28]].forEach(p => redBarrel(...p));
-  for (let i = 0; i < 40; i++) { const p = meshAt(new THREE.PlaneGeometry(0.22, 0.3), I.paper, rand(-11, 11), 0.03, rand(13, 23), world, false); p.rotation.x = -Math.PI / 2; p.rotation.z = rand(0, 6); }
-  for (let i = 0; i < 12; i++) addDecal(rand(-14, 14), rand(-40, 22), rand(0.6, 1.6));
+  [[-20, -28.5], [21, -41.5], [-9.5, -6], [-12.5, 40.5]].forEach(p => crate(...p));
+  [[-21.5, -40], [21.5, -28.5], [10.5, -5.5]].forEach(p => redBarrel(...p));
+  for (let i = 0; i < 40; i++) { const p = meshAt(new THREE.PlaneGeometry(0.22, 0.3), I.paper, rand(-13, -3), 0.03, rand(18, 41), world, false); p.rotation.x = -Math.PI / 2; p.rotation.z = rand(0, 6); }
+  for (let i = 0; i < 12; i++) addDecal(rand(-11, 11), rand(-40, 40), rand(0.6, 1.6));
+}
+function pipeRun(x, z0, z1, y, r = 0.12) {
+  const S = subwayAssets(), m = meshAt(new THREE.CylinderGeometry(r, r, z1 - z0, 8), S.pipe, x, y, (z0 + z1) / 2, world, false); m.rotation.x = Math.PI / 2;
 }
 
 // ---- STAGE 4: underground laboratory ----
@@ -1866,17 +2024,27 @@ STAGES.stationIn = {
   boss: 'mutant', bossPos: [0, -38], arena: [-17.8, 17.8, -42.8, -18.2], arenaDoor: [0, -17], bossName: '変異体 ― THE ABERRATION', bossShort: '変異体', bossBanner: 'THE ABERRATION',
   ending: '警察署を抜け出した。だが、この街で何が起きたのか――',
 };
+STAGES.sewer = {
+  id: 'sewer', build: buildSewer, start: [4, 38.5], trader: [4, 34], flashlight: true, water: 0.85, navSpawn: 45,
+  spawns: [[-28, -36], [-4, -36], [36, -36], [-20, -28], [20, -28], [-36, -12], [-12, -12], [36, -20], [36, -4], [-36, 4], [4, 4], [28, 12], [-20, 20], [12, 20], [-36, 28], [36, 28], [-28, 36], [12, -12], [-20, 12]],
+  waves: [{ title: 'SUBWAY 1', sub: '下水道', atmos: 'sewer', explore: true, prologue: true, hint: 150, total: 18, conc: 5, mix: { zombie: 0.4, worker: 0.25, croc: 0.35 },
+    obj: '入り組んだ下水道を抜けて、地下鉄への出口を探せ', go: '出口の方角が分かった', goObj: '青い光の出口へ向かえ（光の柱）', goal: [-36, -36], next: 'subway' }],
+};
 STAGES.subway = {
-  id: 'subway', build: buildSubway, start: [0, 39], trader: [9.6, 21.6], flashlight: true,
-  spawns: [[7.5, 35], [6, 33], [-10.5, 18], [10.5, 14], [-11, 10.5], [11, 9], [0, -10.5], [-11, -26], [9, -26], [-3, -41], [5, -41], [-20.5, -29.5], [20.5, -29.5], [-13.5, -11]],
+  id: 'subway', entry: 'sewer', build: buildSubway, start: [-8, 39], trader: [-11, 37], flashlight: true,
+  spawns: [[-10, 25], [-11, 40], [0, 6], [0, -2], [-10, -12], [9.5, -14.5], [-9, -18], [0, -24], [-10, -29], [10, -29], [-20, -41], [20, -34]],
   waves: [
-    { title: 'SUBWAY 1', sub: '地下道', atmos: 'tunnel', total: 10, conc: 5, mix: { zombie: 0.5, worker: 0.4, cop: 0.1 }, obj: '地下道を抜けて駅へ向かえ' },
-    { title: 'SUBWAY 2', sub: '駅のホーム', atmos: 'tunnel', total: 15, conc: 7, mix: { zombie: 0.4, worker: 0.3, runner: 0.3 }, obj: 'ホームに群がるゾンビを片付けろ' },
-    { title: 'SUBWAY 3', sub: '線路の暗闇', atmos: 'tunnelDark', dim: true, total: 18, conc: 8, mix: { zombie: 0.3, worker: 0.3, runner: 0.25, fat: 0.15 }, obj: '暗いトンネルを、ライトを頼りに進め' },
-    { title: 'FINAL', sub: '車両倉庫', atmos: 'tunnelBoss', total: 8, conc: 3, mix: { worker: 0.6, runner: 0.4 }, obj: '倉庫に潜む掘削者を倒せ', boss: true },
+    { title: 'SUBWAY 2', sub: '廃駅', atmos: 'tunnel', total: 10, conc: 5, mix: { zombie: 0.5, worker: 0.35, cop: 0.15 }, obj: '壊れた車両の中を抜けて、線路へ降りろ',
+      spawns: [[-10, 25], [-11, 40], [-5, 33], [0, 6], [0, 0], [0, 30], [0, 16]], traderAt: [-10, 20] },
+    { title: 'SUBWAY 3', sub: '線路の暗闇', atmos: 'tunnelDark', dim: true, total: 14, conc: 6, mix: { zombie: 0.35, worker: 0.35, runner: 0.3 }, obj: '暗いトンネルを抜けて、次の駅へ向かえ',
+      spawns: [[0, 8], [0, 2], [0, -2], [-10, -12], [9, -6], [-9, -18], [9.5, -14.5]], traderAt: [-5, -16] },
+    { title: 'SUBWAY 4', sub: '次の駅', atmos: 'tunnel', total: 18, conc: 8, mix: { zombie: 0.3, worker: 0.3, runner: 0.25, fat: 0.15 }, obj: '駅を確保して、車両庫への道を開け',
+      spawns: [[-10, -12], [9, -6], [-9, -18], [9.5, -14.5], [0, -24], [-10, -29], [10, -29], [0, 0]], traderAt: [-5, -16] },
+    { title: 'FINAL', sub: '車両庫', atmos: 'tunnelBoss', total: 8, conc: 3, mix: { worker: 0.6, runner: 0.4 }, obj: '車両庫に潜む掘削者を倒せ', boss: true,
+      spawns: [[-10, -29], [10, -29], [-20, -41], [20, -34], [0, -24]] },
   ],
-  boss: 'digger', bossPos: [0, -39], arena: [-21.8, 21.8, -42.8, -28.2], arenaDoor: [11, -29], bossName: '掘削者 ― THE DIGGER', bossShort: '掘削者', bossBanner: 'THE DIGGER',
-  ending: '車両倉庫の奥に、封じられた鉄の扉がある――',
+  boss: 'digger', bossPos: [0, -38], arena: [-23.8, 23.8, -42.8, -26.2], arenaDoor: [0, -25], bossName: '掘削者 ― THE DIGGER', bossShort: '掘削者', bossBanner: 'THE DIGGER',
+  ending: '車両庫の奥に、封じられた鉄の扉がある――',
 };
 STAGES.lab = {
   id: 'lab', build: buildLab, start: [0, 39.5], trader: [11.5, 29.5], flashlight: true,
@@ -2168,7 +2336,7 @@ class Enemy {
     const P = player.pos, dx = P.x - this.pos.x, dz = P.z - this.pos.z, dist = Math.hypot(dx, dz) || 0.001;
     const toFace = Math.atan2(dx, dz);
     this.losT -= dt;
-    if (this.losT <= 0) { this.losT = rand(0.2, 0.35); this.los = segClear(_a.set(this.pos.x, 0.6, this.pos.z), _b.set(P.x, 0.6, P.z)); }
+    if (this.losT <= 0) { this.losT = rand(0.2, 0.35); this.los = pathClear(this.pos.x, this.pos.z, P.x, P.z, this.radius); }
     if (this.voiceT <= 0) { this.voiceT = rand(2.5, 6); if (dist < 25) { if (this.t.zombie) sfx.groan(this.pos, this.scale); else { sfx.voice(this.pos, this.scale); if (dist < 16 && Math.random() < 0.25) showSubtitle(pick(CHANTS)); } } }
     let moveSpeed = 0;
    
@@ -2229,8 +2397,8 @@ class Enemy {
     }
     this.vel.x = damp(this.vel.x, desire.x, 6, dt); this.vel.z = damp(this.vel.z, desire.z, 6, dt);
     if (this.state === 'down' || this.state === 'stagger' || this.state === 'getup' || this.state === 'stunned') this.vel.multiplyScalar(Math.max(0, 1 - dt * 6));
-    this.pos.addScaledVector(this.vel, dt);
-    collide(this.pos, this.radius);
+    _ntPrev.copy(this.pos); this.pos.addScaledVector(this.vel, dt);
+    collide(this.pos, this.radius); noTunnel(_ntPrev, this.pos);
     const sp = Math.hypot(this.vel.x, this.vel.z);
     if (this.state === 'chase' && sp > 0.2) this.face = dampAng(this.face, this.los && dist < 8 ? toFace : Math.atan2(this.vel.x, this.vel.z), 7, dt);
     this.phase += sp * dt * 3.2;
@@ -2321,8 +2489,8 @@ class Enemy {
       case 'chargeWind': this.face = dampAng(this.face, toFace, 8, dt); p.tx = 0.5; p.rsx = -0.4; p.lsx = -0.4; p.lhx = 0.4; p.lkx = 0.8; if (this.st > 0.9) { this.setState('charge'); this.chargeDir.set(Math.sin(this.face), 0, Math.cos(this.face)); this.hitThisCharge = false; qte.dodgeShown = false; } break;
       case 'charge': {
         p.tx = 0.55; p.rsx = -0.8; walkPose(p, this.st * 16, 1.3);
-        this.pos.addScaledVector(this.chargeDir, (this.phase2 ? 11 : 9.5) * dt);
-        const pre = this.pos.clone(); collide(this.pos, this.radius);
+        _ntPrev.copy(this.pos); this.pos.addScaledVector(this.chargeDir, (this.phase2 ? 11 : 9.5) * dt);
+        const pre = this.pos.clone(); collide(this.pos, this.radius); noTunnel(_ntPrev, this.pos);
         const blocked = pre.distanceToSquared(this.pos) > 0.0004 || Math.abs(this.pos.x) >= BOUND || Math.abs(this.pos.z) >= BOUND || keepInArena(this);
         const rel = _b.subVectors(P, this.pos); const ahead = rel.dot(this.chargeDir);
         if (!this.hitThisCharge && ahead > -0.5 && ahead < 1.6 && Math.abs(rel.x * this.chargeDir.z - rel.z * this.chargeDir.x) < 1.3) {
@@ -2341,12 +2509,12 @@ class Enemy {
     if (speed > 0) {
       const desire = _c;
       if (this.state === 'intro') desire.set(0, 0, 1);
-      else if (segClear(_a.set(this.pos.x, 0.6, this.pos.z), _b.set(P.x, 0.6, P.z))) desire.set(dx / dist, 0, dz / dist);
+      else if (pathClear(this.pos.x, this.pos.z, P.x, P.z, this.radius)) desire.set(dx / dist, 0, dz / dist);
       else if (!navDir(this.pos, desire)) desire.set(dx / dist, 0, dz / dist);
       if (dist < 2.2 && this.state === 'chase') desire.set(0, 0, 0);
       this.vel.x = damp(this.vel.x, desire.x * speed, 5, dt); this.vel.z = damp(this.vel.z, desire.z * speed, 5, dt);
     } else if (this.state !== 'charge') this.vel.multiplyScalar(Math.max(0, 1 - dt * 6));
-    if (this.state !== 'charge') { this.pos.addScaledVector(this.vel, dt); if (this.state !== 'intro') collide(this.pos, this.radius); keepInArena(this); }
+    if (this.state !== 'charge') { _ntPrev.copy(this.pos); this.pos.addScaledVector(this.vel, dt); if (this.state !== 'intro') { collide(this.pos, this.radius); noTunnel(_ntPrev, this.pos); } keepInArena(this); }
     const sp = this.state === 'charge' ? 9 : Math.hypot(this.vel.x, this.vel.z);
     if (this.state === 'chase' || this.state === 'intro') { this.face = dampAng(this.face, this.state === 'intro' ? 0 : toFace, 4, dt); walkPose(p, this.phase, clamp(sp / 1.6, 0, 1)); p.rsx = (p.rsx || 0) - 0.3; p.tx = (p.tx || 0) + 0.15; }
     this.phase += sp * dt * 2.2;
@@ -2472,7 +2640,7 @@ function dropLoot(pos, type) {
 function updatePickups(dt) {
   for (const p of pickups) {
     if (!p.alive) continue;
-    p.t += dt; p.life -= dt; p.m.rotation.y += dt * 2; p.m.position.y = Math.sin(p.t * 3) * 0.06;
+    p.t += dt; p.life -= dt; p.m.rotation.y += dt * 2; p.m.position.y = (STAGE.water ? STAGE.water - 0.3 : 0) + Math.sin(p.t * 3) * 0.06;
     if (p.kind === 'gold') p.m.rotation.x = Math.PI / 2;
     const d = Math.hypot(p.g.position.x - player.pos.x, p.g.position.z - player.pos.z);
     if (d < 1.4 && !player.dead) { collectPickup(p); }
@@ -2537,11 +2705,169 @@ const stats = { kills: 0, headKills: 0, shots: 0, hits: 0, heads: 0, time: 0, de
 let snapshot = null;
 
 function pickType(mix) { let r = Math.random(); for (const k in mix) { r -= mix[k]; if (r <= 0) return k; } return Object.keys(mix)[0]; }
+// ---- crocodile zombie (sewer): lurks underwater, shows its fin before every attack ----
+// lurk (hidden, can't be hit) → stalk (fin above water; hit the fin → float) → biteWind → bite → back to lurk
+// float: knocked belly-up on the surface for a while, the only time the body can be shot
+const crocSkin = mat(0x3c4632, { rough: 0.7 }), crocRot = mat(0x6a2a24, { rough: 0.5 }), crocBelly = mat(0x9a9878, { rough: 0.8 });
+const crocFinMat = mat(0x7a8068, { rough: 0.5 }), crocTip = mat(0xb02018, { rough: 0.4, emissive: 0x801008, ei: 0.8 });
+function makeCroc() {
+  const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
+  part(body, 0.8, 0.42, 1.7, crocSkin, 0, 0.21, 0);
+  part(body, 0.7, 0.06, 1.5, crocBelly, 0, 0.0, 0);
+  part(body, 0.3, 0.1, 0.5, crocRot, 0.22, 0.4, 0.2); part(body, 0.25, 0.1, 0.4, crocRot, -0.2, 0.38, -0.4);
+  for (let i = 0; i < 4; i++) part(body, 0.06, 0.04, 0.3, mat(0xd8ccb0), -0.26 + i * 0.17, 0.43, 0.2); // ribs through the rot
+  const neck = grp(body, 0, 0.22, 0.85), head = grp(neck, 0, 0, 0.1);
+  part(head, 0.5, 0.26, 0.55, crocSkin, 0, 0.04, 0.25);
+  const snout = part(head, 0.34, 0.16, 0.55, crocSkin, 0, 0.06, 0.78); void snout;
+  const jaw = grp(head, 0, -0.06, 0.05); part(jaw, 0.42, 0.1, 1.0, crocBelly, 0, -0.03, 0.48);
+  const teeth = mat(0xe8e0c8);
+  for (const sx of [-0.15, 0.15]) for (let k = 0; k < 4; k++) { part(head, 0.03, 0.07, 0.03, teeth, sx, -0.04, 0.55 + k * 0.17); part(jaw, 0.03, 0.06, 0.03, teeth, sx * 0.9, 0.04, 0.5 + k * 0.17); }
+  const eyeM = new THREE.MeshBasicMaterial({ color: 0xffc030 });
+  for (const sx of [-0.17, 0.17]) { const e = new THREE.Mesh(boxGeo(0.07, 0.06, 0.07), eyeM); e.position.set(sx, 0.2, 0.32); head.add(e); }
+  const tail = []; let prev = body, len = [0.75, 0.65, 0.6], w = 0.62;
+  for (let i = 0; i < 3; i++) { const t = grp(prev, 0, i ? 0 : 0.2, i ? -len[i - 1] : -0.85); part(t, w, 0.3 - i * 0.06, len[i], crocSkin, 0, 0, -len[i] / 2); tail.push(t); prev = t; w *= 0.68; }
+  for (const [sx, sz] of [[-1, 0.55], [1, 0.55], [-1, -0.55], [1, -0.55]]) { const l = part(body, 0.16, 0.14, 0.34, crocSkin, sx * 0.48, 0.02, sz); l.rotation.y = sx * 0.6; }
+  // the dorsal fin: three tall jagged plates with red tips, the tell before every attack
+  const fin = grp(body, 0, 0.42, -0.05); fin.scale.setScalar(1.35);
+  [[0.38, 0.62, 0.3], [0.52, 0.8, 0], [0.34, 0.55, -0.32]].forEach(([wd, h, z]) => {
+    const p = new THREE.Mesh(new THREE.ConeGeometry(wd / 2, h, 4), crocFinMat); p.scale.z = 0.18; p.position.set(0, h / 2, z); p.rotation.y = Math.PI / 4; p.castShadow = true; fin.add(p);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(wd / 6, h * 0.3, 4), crocTip); tip.scale.z = 0.2; tip.position.set(0, h * 0.86, z); tip.rotation.y = Math.PI / 4; fin.add(tip);
+  });
+  for (let i = 0; i < 2; i++) { const p = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 4), crocFinMat); p.position.set(0, 0.25, -0.3 - i * 0.3); p.scale.z = 0.3; tail[0].add(p); }
+  root.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  charify(root);
+  return { root, body, neck, head, jaw, tail, fin };
+}
+const CROC_DEPTH = { lurk: -1.5, stalk: 0.2, float: 0.62 };
+class Croc {
+  constructor(x, z) {
+    this.type = 'croc'; this.t = ETYPES.croc; this.boss = false; this.croc = true;
+    this.hp = this.maxHp = this.t.hp * (1 + director.wave * 0.08);
+    this.pos = new V3(x, 0, z); this.vel = new V3(); this.face = Math.atan2(player.pos.x - x, player.pos.z - z);
+    this.state = 'lurk'; this.st = 0; this.cd = rand(2, 4); this.speed = this.t.speed;
+    this.dead = false; this.removeT = 0; this.scale = 1; this.radius = 0.55; this.isParasite = false; this.parasiteChance = 0; this.stagger = 0;
+    this.y = CROC_DEPTH.lurk; this.roll = 0; this.bubbleT = 0;
+    this.h = makeCroc(); this.h.root.position.set(x, this.y, z); this.h.root.rotation.y = this.face; this.h.root.visible = false; scene.add(this.h.root);
+    this.hb = { head: new V3(), neck: new V3(), hips: new V3(), feet: new V3(), core: new V3(), fin: new V3(), tail: new V3() };
+    this.updateHB();
+  }
+  get alive() { return !this.dead && this.state !== 'dying'; }
+  get ghost() { return this.state === 'lurk'; }   // underwater: no collision, not on radar, can't be hit
+  setState(s) {
+    // a guard against the bite (guardRecoil) flips it over just like a fin hit
+    if (s === 'stagger' || s === 'flinch') { if (this.state === 'bite' || this.state === 'biteWind') this.toFloat(this.stDur > 1 ? 4 : 2.5); return; }
+    this.state = s; this.st = 0;
+  }
+  knockdown() { if (this.state !== 'lurk') this.toFloat(4); }
+  toFloat(dur) { this.state = 'float'; this.st = 0; this.floatDur = dur; sfx.splash(this.pos, 1); this.splash(1.4); showLog('ワニがひるんだ！今だ！'); }
+  updateHB() {
+    const h = this.h; h.root.updateMatrixWorld(true);
+    h.head.localToWorld(this.hb.head.set(0, 0.05, 0.5)); h.neck.getWorldPosition(this.hb.neck);
+    h.body.localToWorld(this.hb.hips.set(0, 0.2, -0.6)); this.hb.feet.copy(this.hb.hips);
+    h.fin.localToWorld(this.hb.fin.set(0, 0.4, 0));
+  }
+  // ray test used by raycastWorld: only the fin while stalking, the whole body while it floats or bites
+  rayHit(o, d) {
+    let best = null; const take = (t, part) => { if (t > 0 && (!best || t < best.t)) best = { t, part }; };
+    if (this.state === 'stalk' || this.state === 'biteWind') take(raySphere(o, d, this.hb.fin, 0.45), 'fin');
+    if (this.state === 'float' || this.state === 'bite' || this.state === 'biteWind') {
+      take(raySphere(o, d, this.hb.head, 0.32), 'head');
+      take(rayCapsule(o, d, this.hb.hips, this.hb.neck, 0.42), 'body');
+    }
+    return best;
+  }
+  damage(dmg, part, dir, src = 'gun') {
+    if (!this.alive || this.state === 'lurk') return;
+    if (this.state === 'stalk' || (this.state === 'biteWind' && part === 'fin')) {
+      // hitting the fin: a little damage, and it's knocked belly-up
+      this.hp -= dmg * 0.5; fxBlood(this.hb.fin, dir, 8); sfx.hit(this.pos);
+      if (this.hp <= 0) { this.die(); return; }
+      this.toFloat(src === 'boom' ? 5 : 4.2); return;
+    }
+    const m = part === 'head' ? 2 : 1;
+    this.hp -= dmg * m; fxBlood(part === 'head' ? this.hb.head : this.hb.neck, dir, part === 'head' ? 16 : 10); sfx.hit(this.pos);
+    if (this.hp <= 0) this.die(part === 'head');
+    else if (this.state !== 'float') this.toFloat(2.5);
+  }
+  die(head) {
+    this.state = 'dying'; this.st = 0; stats.kills++; if (head) stats.headKills++;
+    sfx.splash(this.pos, 1); this.splash(2); dropLoot(this.pos, 'croc');
+  }
+  splash(k = 1) {
+    const W = STAGE.water || 0.85;
+    for (let i = 0; i < 18 * k; i++) particlesN.add(this.pos.x + rand(-0.6, 0.6), W, this.pos.z + rand(-0.6, 0.6), rand(-1.5, 1.5), rand(1, 3.5) * k, rand(-1.5, 1.5), rand(0.4, 0.8), 0.07, 0.04, 0.45, 0.42, 0.34, 0.8, 9, 0.5);
+  }
+  update(dt) {
+    this.st += dt; this.cd -= dt;
+    const W = STAGE.water || 0.85, P = player.pos, h = this.h;
+    if (this.dead) { this.removeT += dt; h.root.position.y -= dt * 0.3; return; }
+    const dx = P.x - this.pos.x, dz = P.z - this.pos.z, dist = Math.hypot(dx, dz), toFace = Math.atan2(dx, dz);
+    let speed = 0, targetY = CROC_DEPTH.lurk, roll = 0, jaw = 0.05, pitch = 0;
+    const steer = () => { // head straight for the player when the way is clear, otherwise follow the flow field
+      _a.set(dx, 0, dz).normalize();
+      if (dist > 2 && !pathClear(this.pos.x, this.pos.z, P.x, P.z, this.radius, 1)) { const nd = navDir(this.pos, _c); if (nd) _a.copy(nd); }
+      this.face = dampAng(this.face, Math.atan2(_a.x, _a.z), 4, dt);
+    };
+    switch (this.state) {
+      case 'lurk':
+        speed = this.speed; steer();
+        if ((this.bubbleT -= dt) <= 0) { this.bubbleT = rand(0.6, 1.4); particlesN.add(this.pos.x + rand(-.3, .3), W + 0.02, this.pos.z + rand(-.3, .3), 0, 0.15, 0, 0.6, 0.04, 0.14, 0.5, 0.48, 0.4, 0.5, 0, 1); }
+        if (dist < 10 && this.cd <= 0 && !player.dead) { this.setState('stalk'); sfx.splash(this.pos, 0.3); }
+        break;
+      case 'stalk':
+        speed = this.speed * 1.25; targetY = CROC_DEPTH.stalk; steer();
+        // a foamy wake around the fin
+        for (let i = 0; i < 2; i++) if (Math.random() < dt * 14) { const sd = Math.random() < 0.5 ? -1 : 1, fx = Math.cos(this.face) * sd, fz = -Math.sin(this.face) * sd; particlesN.add(this.hb.fin.x + fx * 0.2, W + 0.04, this.hb.fin.z + fz * 0.2, fx * 0.8, 0.4, fz * 0.8, 0.7, 0.06, 0.3, 0.85, 0.82, 0.72, 0.75, 2, 1.5); }
+        if (dist < 2.8) this.setState('biteWind');
+        else if (this.st > 4) { this.setState('lurk'); this.cd = rand(1.5, 3); }
+        break;
+      case 'biteWind':
+        targetY = 0.45; pitch = -0.45; jaw = 0.6; this.face = dampAng(this.face, toFace, 10, dt);
+        if (this.st > 0.4) { this.setState('bite'); sfx.splash(this.pos, 0.8); this.splash(1); }
+        break;
+      case 'bite':
+        targetY = 0.45; pitch = -0.2; jaw = this.st < 0.12 ? 0.6 : 0; speed = this.st < 0.2 ? 7 : 0; this.vel.set(Math.sin(this.face), 0, Math.cos(this.face));
+        if (!this.struck && this.st > 0.12) {
+          this.struck = true;
+          const f = _a.set(Math.sin(this.face), 0, Math.cos(this.face)), ahead = dx * f.x + dz * f.z;
+          if (dist < 2.6 && ahead > 0.2 && hurtPlayer(this.t.dmg, this.pos, false, this) === true) knockPlayer(this.pos, 3);
+        }
+        if (this.state === 'bite' && this.st > 0.7) { this.setState('lurk'); this.cd = rand(3, 5); }
+        break;
+      case 'float':
+        targetY = CROC_DEPTH.float; roll = Math.PI; jaw = 0.25;
+        if (this.st > this.floatDur) { this.setState('lurk'); this.cd = rand(2, 3.5); sfx.splash(this.pos, 0.6); }
+        break;
+      case 'dying':
+        targetY = CROC_DEPTH.float - 0.15; roll = Math.PI; jaw = 0.4;
+        if (this.st > 4) this.dead = true;
+        break;
+    }
+    // movement (along its facing) and collision
+    _ntPrev.copy(this.pos);
+    if (this.state === 'bite') this.pos.addScaledVector(this.vel, speed * dt);
+    else if (speed) { this.pos.x += Math.sin(this.face) * speed * dt; this.pos.z += Math.cos(this.face) * speed * dt; }
+    collide(this.pos, this.radius); noTunnel(_ntPrev, this.pos);
+    // pose
+    this.y = damp(this.y, targetY, this.state === 'lurk' ? 2 : 6, dt); this.roll = damp(this.roll, roll, 5, dt);
+    h.root.visible = this.y > -1.2;
+    h.root.position.set(this.pos.x, this.y, this.pos.z); h.root.rotation.set(0, this.face, 0);
+    h.body.rotation.set(pitch, 0, this.roll);
+    h.jaw.rotation.x = damp(h.jaw.rotation.x, jaw, 14, dt);
+    const sw = Math.sin(performance.now() / (this.state === 'float' ? 600 : 220)) * (speed > 0 ? 0.35 : 0.12);
+    h.tail.forEach((t, i) => { t.rotation.y = sw * (i + 1) * 0.6; });
+    this.updateHB();
+  }
+}
 function spawnEnemy(type) {
-  const cands = STAGE.spawns.map(([x, z]) => ({ x, z, d: Math.hypot(x - player.pos.x, z - player.pos.z) })).filter(s => s.d > 16).sort(() => Math.random() - 0.5);
+  let cands = (STAGE.waves[director.wave]?.spawns || STAGE.spawns).map(([x, z]) => ({ x, z, d: Math.hypot(x - player.pos.x, z - player.pos.z) })).filter(s => s.d > 16).sort(() => Math.random() - 0.5);
+  if (STAGE.navSpawn) { // mazes: only spawn where the walk to the player is short, not just the straight-line distance
+    const near = cands.filter(s => { const k = Math.floor(s.z - NAV.org) * NAV.n + Math.floor(s.x - NAV.org), d = NAV.dist[k]; return d >= 0 && d <= STAGE.navSpawn; });
+    if (near.length) cands = near;
+  }
   const s = cands[0] || { x: STAGE.spawns[0][0], z: STAGE.spawns[0][1] };
   const pos = new V3(s.x + rand(-1.5, 1.5), 0, s.z + rand(-1.5, 1.5)); collide(pos, 0.4);
-  const e = new Enemy(type, pos.x, pos.z, STAGE.waves[director.wave]); enemies.push(e); return e;
+  const e = type === 'croc' ? new Croc(pos.x, pos.z) : new Enemy(type, pos.x, pos.z, STAGE.waves[director.wave]); enemies.push(e); return e;
 }
 function startWave(i, fromContinue) {
   director.wave = i; director.phase = 'intro'; director.introT = 3.5; director.spawned = 0; director.spawnT = 1.2; director.bossDead = false; director.boss = null; director.extraSpawns = 0;
@@ -2569,14 +2895,14 @@ function updateDirector(dt) {
     }
   } else if (director.phase === 'combat' && w.prologue) {
     director.proT += dt; const goal = w.goal || STAGE.goal;
-    if (director.spawned < w.total && alive < w.conc) { director.spawnT -= dt; if (director.spawnT <= 0) { spawnEnemy(pickType(w.mix)); director.spawned++; director.spawnT = rand(0.2, 0.6); } }
+    if (director.spawned < w.total && alive < w.conc) { director.spawnT -= dt; if (director.spawnT <= 0) { spawnEnemy(pickType(w.mix)); director.spawned++; director.spawnT = w.explore ? rand(2, 4.5) : rand(0.2, 0.6); } }
     if (!director.goShown) setH('obj', w.obj);
-    if (director.proT > 1.2 && !director.ambushShown) { director.ambushShown = true; showBanner('AMBUSH', 'ゾンビの群れだ！'); sfx.groan(player.pos, 0.8); }
-    if (director.proT > 5 && !director.goShown) {
+    if (director.proT > 1.2 && !director.ambushShown && !w.explore) { director.ambushShown = true; showBanner('AMBUSH', 'ゾンビの群れだ！'); sfx.groan(player.pos, 0.8); }
+    if (director.proT > (w.explore ? w.hint || 150 : 5) && !director.goShown) {
       director.goShown = true; showBanner('', w.go || '警察署に入れ！'); marker.position.set(goal[0], 0, goal[1]); marker.visible = true;
       setH('obj', w.goObj || '警察署に入れ！（光っている入口へ）'); sfx.bell();
     }
-    if (director.goShown && Math.hypot(player.pos.x - goal[0], player.pos.z - goal[1]) < 2.2 && !player.dead) {
+    if ((director.goShown || w.explore) && Math.hypot(player.pos.x - goal[0], player.pos.z - goal[1]) < 2.2 && !player.dead) {
       director.phase = 'transition'; director.transT = 0; player.invuln = 3; marker.visible = false; setFade(true);
     }
   } else if (director.phase === 'transition') {
@@ -2602,6 +2928,7 @@ function updateDirector(dt) {
       else {
         director.phase = 'rest'; const bonus = 800 + director.wave * 600; inv.gold += bonus;
         showBanner('CHAPTER CLEAR', `報酬 ${bonus.toLocaleString()} G`); sfx.cash();
+        if (w.traderAt) TRADER_POS.set(w.traderAt[0], 0, w.traderAt[1]);
         trader.show(); setMusic('rest');
         setH('obj', isTouch ? '商人と取引する／準備ができたら「次の章へ」' : `商人と取引する <span class="kbd">E</span>／準備ができたら <span class="kbd">ENTER</span> で次の章へ`);
         if (isTouch) $('tNext').classList.remove('hidden');
@@ -2695,7 +3022,7 @@ function doKnife() {
 function applyKnife() {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   for (const e of enemies) {
-    if (!e.alive) continue;
+    if (!e.alive || e.ghost) continue;
     const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z, d = Math.hypot(dx, dz);
     if (d < (e.boss ? 2.6 : 1.8) && (dx * fx + dz * fz) / (d || 1) > 0.45) {
       const dmg = e.state === 'down' ? 16 : 8; e.damage(dmg, e.state === 'down' ? 'head' : 'body', _a.set(fx, 0, fz), 'knife');
@@ -2747,6 +3074,7 @@ function raycastWorld(o, d, maxT, minT = 0) {
   for (const p of projectiles) { if (!p.alive || p.kind !== 'axe') continue; const t = raySphere(o, d, p.pos, 0.35); if (t > minT && t < best.t) best = { t, type: 'proj', proj: p }; }
   for (const e of enemies) {
     if (!e.alive) continue;
+    if (e.croc) { const h = e.rayHit(o, d); if (h && h.t > minT && h.t < best.t) best = { t: h.t, type: 'enemy', enemy: e, part: h.part }; continue; }
     _p.subVectors(e.hb.hips, o); const along = _p.dot(d); if (along < 0) continue;
     if (_p.lengthSq() - along * along > 9 * e.scale * e.scale) continue;
     const sc = e.scale;
@@ -2921,7 +3249,7 @@ function updateRadar(dt) {
   if ((radar.losT -= dt) <= 0) {
     radar.losT = 0.1; radar.eye.set(P.x, P.y + 1.5, P.z);
     for (const e of enemies) {
-      if (!e.alive || e.pos.distanceTo(P) > RADAR_R) continue;
+      if (!e.alive || e.ghost || e.pos.distanceTo(P) > RADAR_R) continue;
       radar.tgt.copy(e.hb.neck); if (radar.tgt.lengthSq() === 0) radar.tgt.set(e.pos.x, 1.4, e.pos.z);
       if (segClear(radar.eye, radar.tgt)) e.radarT = RADAR_MEM;
     }
@@ -2990,7 +3318,7 @@ function updateHUD(dt) {
   const nearTrader = !player.dead && !player.grabbedBy && trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2;
   if (isTouch && nearTrader !== ui.trade) { ui.trade = nearTrader; $('tTrade').classList.toggle('hidden', !nearTrader); }
   if (!player.dead && !player.grabbedBy) {
-    if (player.state === 'normal' && player.guardCD <= 0 && enemies.some(e => e.alive && (e.state === 'windup' || e.state === 'grabWind' || e.state === 'swingWind') && e.pos.distanceTo(player.pos) < (e.boss ? 5 : 3))) pr = `<kbd>${isTouch ? 'ガード' : 'F'}</kbd>ガード！`;
+    if (player.state === 'normal' && player.guardCD <= 0 && enemies.some(e => e.alive && (e.state === 'windup' || e.state === 'grabWind' || e.state === 'swingWind' || e.state === 'biteWind') && e.pos.distanceTo(player.pos) < (e.boss ? 5 : 3))) pr = `<kbd>${isTouch ? 'ガード' : 'F'}</kbd>ガード！`;
     else if (nearTrader) pr = isTouch ? '' : `<kbd>E</kbd>商人と取引`;
     else if (inv.mag[id] === 0 && inv.ammo[id] > 0 && player.reloadT <= 0) pr = `<kbd>R</kbd>リロード`;
   }
@@ -3178,22 +3506,28 @@ function updatePlayer(dt) {
   const canMove = (p.state === 'normal' || p.state === 'guard') && !p.grabbedBy && p.hurtT <= 0;
   const run = (keys.ShiftLeft || keys.ShiftRight || input.run) && my > 0.3 && p.reloadT <= 0 && !p.aiming && p.state !== 'guard';
   let spd = p.state === 'guard' ? 1.1 : p.aiming ? 1.3 : run ? 4.4 : 3.0; if (my < 0) spd *= 0.65; if (p.reloadT > 0) spd *= 0.75;
+  if (STAGE.water) spd *= 0.8; // wading
   const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw), rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
   let tvx = 0, tvz = 0;
   if (canMove && ml > 0.05) { tvx = (fx * my + rx * mx) * spd; tvz = (fz * my + rz * mx) * spd; }
   if (p.dodgeT > 0) { p.dodgeT -= dt; tvx = p.dodgeDir.x * 7.5; tvz = p.dodgeDir.z * 7.5; }
   const acc = p.state === 'stumble' ? 3 : 12;
   p.vel.x = damp(p.vel.x, tvx, acc, dt); p.vel.z = damp(p.vel.z, tvz, acc, dt);
-  p.pos.addScaledVector(p.vel, dt);
-  collide(p.pos, 0.35);
+  _ntPrev.copy(p.pos); p.pos.addScaledVector(p.vel, dt);
+  collide(p.pos, 0.35); noTunnel(_ntPrev, p.pos);
   for (const e of enemies) {
-    if (!e.alive || e.state === 'down') continue;
+    if (!e.alive || e.state === 'down' || e.ghost) continue;
     const dx = p.pos.x - e.pos.x, dz = p.pos.z - e.pos.z, d = Math.hypot(dx, dz), rr = 0.35 + e.radius;
     if (d < rr && d > 1e-4) { p.pos.x += dx / d * (rr - d); p.pos.z += dz / d * (rr - d); }
   }
   if (p.state === 'stumble' && p.stateT > 0.5) p.state = 'normal';
   const sp = Math.hypot(p.vel.x, p.vel.z);
-  p.stepAcc += sp * dt; if (p.stepAcc > (run ? 1.5 : 1.15)) { p.stepAcc = 0; sfx.step(run); }
+  p.stepAcc += sp * dt;
+  if (p.stepAcc > (run ? 1.5 : 1.15)) {
+    p.stepAcc = 0;
+    if (!STAGE.water) sfx.step(run);
+    else { sfx.splash(null, run ? 0.35 : 0.2); for (let i = 0; i < 8; i++) particlesN.add(p.pos.x + rand(-.4, .4), STAGE.water + 0.02, p.pos.z + rand(-.4, .4), rand(-.8, .8), rand(0.3, 1.2), rand(-.8, .8), 0.5, 0.05, 0.03, 0.5, 0.48, 0.4, 0.6, 6, 0.5); }
+  }
   p.phase += sp * dt * (run ? 2.5 : 3.2);
   // actions
   p.guardCD -= dt;
@@ -3326,6 +3660,7 @@ function tick(dt) {
     player.stateT += dt; updatePlayer(dt); updateCamera(dt);
   }
   updateRain(dt, game.state === 'play' ? player.pos : camera.position);
+  if (STAGE.water && SEW) { SEW.water.map.offset.x += dt * 0.012; SEW.water.map.offset.y += dt * 0.02; }
   const dimK = director.dim ? 0.1 : 1;
   for (const l of lamps) {
     l.t += dt; let k = 1;

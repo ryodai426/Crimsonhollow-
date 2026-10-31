@@ -1,12 +1,13 @@
 // 新ステージの各エリアを撮影する（node tools/test/tour.js <出力先> [stage,...]）
 const { chromium } = require('playwright');
 const SHOTS = {
-  subway: [[0, 39, 0, 0, '地下道'], [7, 31, 1.4, 0, 'ポンプ室'], [0, 23, 0, 0, '改札'], [0, 10, 0, 1, 'ホーム'], [11, -13, 0, 2, 'トンネル'], [0, -29, 0, 3, '車両倉庫']],
+  sewer: [[4, 38, 0, 0, 'はしご下'], [4, 4, 1.57, 0, '水路'], [12, -12, 0, 0, '部屋'], [-36, -30, 0, 0, '出口']],
+  subway: [[-8, 39, 0, 0, '廃駅'], [0, 33, 0, 0, '車両の中'], [0, 12, 0, 1, '線路'], [0, -5, 0, 2, '次の駅'], [0, -27, 0, 3, '車両庫']],
   lab: [[0, 40, 0, 0, 'エアロック'], [0, 30, 0, 0, '入口ホール'], [0, 14, 0, 0, '培養槽'], [-20, 2, 1.57, 1, '標本保管室'], [20, 2, -1.57, 1, '制御室'], [0, -17, 0, 3, '発生源']],
 };
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const SP = process.argv[2], stages = (process.argv[3] || 'subway,lab').split(',');
+  const SP = process.argv[2], stages = (process.argv[3] || 'sewer,subway,lab').split(',');
   const p = await b.newPage({ viewport: { width: 800, height: 600 } });
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   await p.goto('http://localhost:8766/?' + Date.now()); await p.waitForTimeout(1500);

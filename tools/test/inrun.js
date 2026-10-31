@@ -25,7 +25,7 @@ const { chromium } = require('playwright');
       g.sim(0.1);
       if (g.director.phase === 'rest') { log.push(`  cleared at step ${i}, kills ${g.stats.kills}`); window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter' })); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Enter' })); }
       if (g.game.state === 'win') { log.push('WIN at ' + i); break; }
-      if (i === 11999) log.push('TIMEOUT phase ' + g.director.phase + ' alive ' + g.enemies.filter(e => e.alive).map(e => e.type + '@' + e.pos.x.toFixed(0) + ',' + e.pos.z.toFixed(0)).join(' '));
+      if (i === 11999) log.push('TIMEOUT phase ' + g.director.phase + ' alive ' + g.enemies.filter(e => e.alive).map(e => e.type + '@' + e.pos.x.toFixed(1) + ',' + e.pos.z.toFixed(1) + ':' + e.state + ':hp' + Math.round(e.hp)).join(' '));
     }
     return log;
   }, process.argv[3] || 'stationIn');

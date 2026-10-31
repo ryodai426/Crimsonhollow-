@@ -13,6 +13,12 @@ const { chromium } = require('playwright');
     P.pos.set(0, 0, -31.4); P.hp = 64; P.invuln = 5;
     for (let i = 0; i < 40 && g.stage.id === 'city'; i++) g.sim(0.1);
     log.push(`stage now ${g.stage.id}, wave ${g.director.wave} (${g.stage.waves[g.director.wave].sub}), gold ${g.inv.gold}, hp ${P.hp}, pos ${P.pos.x.toFixed(1)},${P.pos.z.toFixed(1)}`);
+    // STAGE 3: the sewer exit leads to the subway
+    g.startGame('sewer'); P.hp = 80; g.inv.gold = 4321; g.sim(4);
+    log.push(`sewer: water ${g.stage.water}, obj="${document.getElementById('obj').textContent}"`);
+    P.pos.set(-36, 0, -36); P.invuln = 5;
+    for (let i = 0; i < 40 && g.stage.id === 'sewer'; i++) g.sim(0.1);
+    log.push(`stage now ${g.stage.id}, wave ${g.director.wave} (${g.stage.waves[g.director.wave].sub}), gold ${g.inv.gold}, hp ${P.hp}, pos ${P.pos.x.toFixed(1)},${P.pos.z.toFixed(1)}`);
     return log;
   });
   console.log(r.join('\n')); console.log(errs.join('|') || 'no errors'); await b.close();
