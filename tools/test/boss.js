@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
   const b = await chromium.launch({ args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
   const p = await b.newPage({ viewport: { width: 480, height: 270 } });
   const errs=[]; p.on('pageerror', e => errs.push('PAGEERR: ' + e.message + e.stack));
-  await p.goto('http://localhost:8766/?low&' + Date.now()); await p.waitForTimeout(800); await p.click('.stage[data-stage="city"]');
+  await p.goto('http://localhost:8766/?low&' + Date.now()); await p.waitForTimeout(800); await p.click('.stage[data-stage="village"]');
   const out = await p.evaluate(() => {
     const g = window.__game, P = g.player; const log=[]; const seen=new Set();
     g.inv.owned.sg = true; g.inv.ammo.sg = 999; g.inv.ammo.hg = 999; g.inv.mag.sg = 6;
@@ -12,6 +12,8 @@ const { chromium } = require('playwright');
       P.hp = 100; if (P.dead) { P.dead=false; P.state='normal'; }
       const boss = g.director.boss;
       let best=null, bd=1e9; for (const e of g.enemies) { if (!e.alive) continue; const d=e.pos.distanceTo(P.pos); if (d<bd){bd=d;best=e;} }
+      const waiting = e => e.state === 'idle' || e.state === 'return';
+      if (best && waiting(best)) { const act = g.enemies.filter(e => e.alive && !waiting(e)); if (act.length) { best = act.sort((a, b) => a.pos.distanceTo(P.pos) - b.pos.distanceTo(P.pos))[0]; bd = best.pos.distanceTo(P.pos); } else if (i % 10 === 0 && best.home) P.pos.set(best.home.x, 0, best.home.z); }
       g.input.aim=false; g.input.fire=false;
       if (best) {
         const c=g.camera.position, t=best.boss?best.hb.neck:best.hb.head; const dx=t.x-c.x, dy=t.y-c.y, dz=t.z-c.z;

@@ -679,7 +679,7 @@ function buildVillage() {
 // ---- nav grid (flow field toward the player) ----
 const NAV = { n: 92, org: -46, blocked: new Uint8Array(92 * 92), dist: new Int32Array(92 * 92), t: 0 };
 function navBuild() {
-  const { n, org } = NAV; NAV.blocked.fill(0);
+  const { n, org } = NAV; NAV.blocked.fill(0); homeFields.clear();
   for (const s of solids) {
     if (!s.alive || s.maxY < 0.5) continue;
     const m = s.navPad ?? 0.45; // thin walls (train cars) pad less so their narrow insides stay walkable
@@ -689,10 +689,38 @@ function navBuild() {
   }
 }
 const navQ = new Int32Array(92 * 92);
+// ---- chase zones: each stage is split into a few areas (STAGE.zones = [[x0, x1, z0, z1], ...], first match wins).
+// An enemy chases only while the player is in its home zone; otherwise it walks back to where it spawned and waits.
+function zoneOf(x, z) {
+  const Z = STAGE.zones; if (!Z) return -1;
+  for (let i = 0; i < Z.length; i++) { const r = Z[i]; if (x >= r[0] && x < r[1] && z >= r[2] && z < r[3]) return i; }
+  return -1;
+}
+const homeFields = new Map(); // distance fields toward each spawn point, built on first use (cleared by navBuild)
+function homeField(x, z) {
+  const { n, org, blocked } = NAV, s0 = clamp(Math.floor(z - org), 0, n - 1) * n + clamp(Math.floor(x - org), 0, n - 1);
+  if (homeFields.has(s0)) return homeFields.get(s0);
+  const dist = new Int32Array(n * n).fill(-1); let head = 0, tail = 0; dist[s0] = 0; navQ[tail++] = s0;
+  while (head < tail) {
+    const c = navQ[head++], cx = c % n, cz = (c / n) | 0, d = dist[c] + 1;
+    for (const k of [cx > 0 ? c - 1 : -1, cx < n - 1 ? c + 1 : -1, cz > 0 ? c - n : -1, cz < n - 1 ? c + n : -1]) if (k >= 0 && dist[k] < 0 && !blocked[k]) { dist[k] = d; navQ[tail++] = k; }
+  }
+  homeFields.set(s0, dist); return dist;
+}
+// is the player inside this enemy's zone? (a body right next to the player keeps fighting across a zone line)
+function engaged(e, dist) {
+  if (!STAGE.zones || e.boss || player.dead) return true;
+  return zoneOf(player.pos.x, player.pos.z) === e.zone || (dist < 3.5 && e.los);
+}
 function navUpdate(tx, tz) {
   const { n, org, blocked, dist } = NAV; dist.fill(-1);
   let cx = clamp(Math.floor(tx - org), 0, n - 1), cz = clamp(Math.floor(tz - org), 0, n - 1);
   let head = 0, tail = 0; const s = cz * n + cx; dist[s] = 0; navQ[tail++] = s;
+  // standing in a padded cell hemmed in by walls (a corner, a doorway): also start from the open cells around
+  if (blocked[s]) for (let r = 1; r <= 2; r++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+    const x = cx + dx, z = cz + dz; if (x < 0 || z < 0 || x >= n || z >= n) continue;
+    const k = z * n + x; if (!blocked[k] && dist[k] < 0) { dist[k] = r; navQ[tail++] = k; }
+  }
   while (head < tail) {
     const c = navQ[head++], x = c % n, z = (c / n) | 0, d = dist[c] + 1;
     if (x > 0) { const k = c - 1; if (dist[k] < 0 && !blocked[k]) { dist[k] = d; navQ[tail++] = k; } }
@@ -701,8 +729,8 @@ function navUpdate(tx, tz) {
     if (z < n - 1) { const k = c + n; if (dist[k] < 0 && !blocked[k]) { dist[k] = d; navQ[tail++] = k; } }
   }
 }
-function navDir(pos, out) {
-  const { n, org, blocked, dist } = NAV;
+function navDir(pos, out, dist = NAV.dist) {
+  const { n, org, blocked } = NAV;
   const x = clamp(Math.floor(pos.x - org), 0, n - 1), z = clamp(Math.floor(pos.z - org), 0, n - 1);
   let best = dist[z * n + x]; if (best < 0) best = 1e9;
   const stuck = blocked[z * n + x]; // standing in a padded cell next to a wall: don't pick a neighbour on the far side of it
@@ -722,14 +750,20 @@ function navDir(pos, out) {
 }
 
 // collision helpers
-function collide(pos, r) {
-  for (const s of solids) {
+// prev (optional): where the body was last frame. If its centre ends up inside a box (in a corner, pushing out of one
+// wall can shove it into the next), it is pushed back out on the side it came from, never through to the far side.
+function collide(pos, r, prev) {
+  for (let pass = 0; pass < 2; pass++) for (const s of solids) {
     if (!s.alive) continue;
     const cx = clamp(pos.x, s.minX, s.maxX), cz = clamp(pos.z, s.minZ, s.maxZ);
     const dx = pos.x - cx, dz = pos.z - cz, d2 = dx * dx + dz * dz;
     if (d2 >= r * r) continue;
     if (d2 > 1e-8) { const d = Math.sqrt(d2); pos.x += dx / d * (r - d); pos.z += dz / d * (r - d); }
-    else {
+    else if (prev && (prev.x <= s.minX || prev.x >= s.maxX || prev.z <= s.minZ || prev.z >= s.maxZ)) {
+      // leave by the face nearest to where it came from
+      const ox = prev.x <= s.minX ? s.minX - prev.x : prev.x >= s.maxX ? prev.x - s.maxX : -1, oz = prev.z <= s.minZ ? s.minZ - prev.z : prev.z >= s.maxZ ? prev.z - s.maxZ : -1;
+      if (ox >= oz) pos.x = prev.x <= s.minX ? s.minX - r : s.maxX + r; else pos.z = prev.z <= s.minZ ? s.minZ - r : s.maxZ + r;
+    } else {
       const l = pos.x - s.minX, rr = s.maxX - pos.x, t = pos.z - s.minZ, b = s.maxZ - pos.z, m = Math.min(l, rr, t, b);
       if (m === l) pos.x = s.minX - r; else if (m === rr) pos.x = s.maxX + r; else if (m === t) pos.z = s.minZ - r; else pos.z = s.maxZ + r;
     }
@@ -1990,12 +2024,14 @@ function buildLab() {
 const STAGES = {
   village: {
     id: 'village', build: buildVillage, waves: VILLAGE_WAVES, start: [0, 9], trader: [13, 2],
+    zones: [[-50, 0, -50, 0], [0, 50, -50, 0], [-50, 0, 0, 50], [0, 50, 0, 50]], // NW, NE, SW, SE
     spawns: [[-42, 4], [42, 2], [0, 42], [-40, 40], [40, 40], [37, -40], [-41, -40], [-14, 42], [26, -42], [0, -21], [-30, 20.5], [42, -16], [-42, -14], [16, 42], [-20, -41]],
     boss: 'boss', bossPos: [0, -24], bossName: '処刑人 ― THE EXECUTIONER', bossShort: '処刑人', bossBanner: 'THE EXECUTIONER',
     ending: '霧は晴れ、村に朝が来た。だが、調査団の行方は――',
   },
   city: {
     id: 'city', build: buildCity, start: [0, 22], trader: [8.0, 11.6],
+    zones: [[-50, 0, -50, 0], [0, 50, -50, 0], [-50, 0, 0, 50], [0, 50, 0, 50]],
     waves: [
       { title: 'CITY 1', sub: '燃える大通り', atmos: 'cityFire', total: 11, conc: 5, mix: { zombie: 0.8, cop: 0.2 }, obj: 'ゾンビの群れを食い止めろ' },
       { title: 'CITY 2', sub: '封鎖線', atmos: 'cityNight', total: 15, conc: 7, mix: { zombie: 0.5, cop: 0.25, runner: 0.25 }, obj: '走ってくるゾンビに注意しろ' },
@@ -2014,6 +2050,7 @@ STAGES.station = {
 };
 STAGES.stationIn = {
   id: 'stationIn', entry: 'city', build: buildStationInterior, start: [0, 7.5], trader: [-10.1, 4.4], flashlight: true,
+  zones: [[-50, 50, -50, -18], [-50, -12, -18, 50], [12, 50, -18, 50], [-12, 12, -18, 50]], // garage, offices, cells, lobby
   spawns: [[-41, -11], [-41, 11], [-33, 10], [30, -12], [30, 12], [-16, -36], [15, -38], [0, -41], [-36, -22], [35, -22], [-28, 0], [26, 0]],
   waves: [
     { title: 'STATION 1', sub: 'ロビー', atmos: 'indoor', total: 10, conc: 5, mix: { zombie: 0.7, cop: 0.3 }, obj: '署内のゾンビを掃討しろ' },
@@ -2026,12 +2063,14 @@ STAGES.stationIn = {
 };
 STAGES.sewer = {
   id: 'sewer', build: buildSewer, start: [4, 38.5], trader: [4, 34], flashlight: true, water: 0.85, navSpawn: 45,
+  zones: [[-50, 0, -50, 0], [0, 50, -50, 0], [-50, 0, 0, 50], [0, 50, 0, 50]],
   spawns: [[-28, -36], [-4, -36], [36, -36], [-20, -28], [20, -28], [-36, -12], [-12, -12], [36, -20], [36, -4], [-36, 4], [4, 4], [28, 12], [-20, 20], [12, 20], [-36, 28], [36, 28], [-28, 36], [12, -12], [-20, 12]],
   waves: [{ title: 'SUBWAY 1', sub: '下水道', atmos: 'sewer', explore: true, prologue: true, hint: 150, total: 18, conc: 5, mix: { zombie: 0.4, worker: 0.25, croc: 0.35 },
     obj: '入り組んだ下水道を抜けて、地下鉄への出口を探せ', go: '出口の方角が分かった', goObj: '青い光の出口へ向かえ（光の柱）', goal: [-36, -36], next: 'subway' }],
 };
 STAGES.subway = {
   id: 'subway', entry: 'sewer', build: buildSubway, start: [-8, 39], trader: [-11, 37], flashlight: true,
+  zones: [[-50, 50, 14, 50], [-50, 50, -4, 14], [-50, 50, -26, -4], [-50, 50, -50, -26]], // old station, tunnel, next station, depot
   spawns: [[-10, 25], [-11, 40], [0, 6], [0, -2], [-10, -12], [9.5, -14.5], [-9, -18], [0, -24], [-10, -29], [10, -29], [-20, -41], [20, -34]],
   waves: [
     { title: 'SUBWAY 2', sub: '廃駅', atmos: 'tunnel', total: 10, conc: 5, mix: { zombie: 0.5, worker: 0.35, cop: 0.15 }, obj: '壊れた車両の中を抜けて、線路へ降りろ',
@@ -2048,6 +2087,7 @@ STAGES.subway = {
 };
 STAGES.lab = {
   id: 'lab', build: buildLab, start: [0, 39.5], trader: [11.5, 29.5], flashlight: true,
+  zones: [[-50, 50, 16, 50], [-50, 50, -10, 16], [-50, 50, -50, -10]], // entrance, tank lab + wings, containment core
   spawns: [[-11, 29], [10, 18], [-15, -8], [15.5, -1], [-15, 14], [15, 14], [-37, 3], [-21, 8.5], [37, 3], [21, -2.5], [-19, -40], [19, -34], [-10, -19], [19, -19]],
   waves: [
     { title: 'LAB 1', sub: '研究棟入口', atmos: 'lab', total: 10, conc: 5, mix: { sci: 0.6, guard: 0.4 }, obj: '研究所の奥へ進め' },
@@ -2343,6 +2383,7 @@ class Enemy {
     switch (this.state) {
       case 'chase': {
         if (player.dead) { moveSpeed = 0.4; break; }
+        if (!engaged(this, dist)) { this.setState('return'); break; }
         moveSpeed = this.isParasite ? this.speed : this.speed;
         if (dist < this.t.range + 0.1 && this.cd <= 0) {
           if (this.t.grab && !player.grabbedBy && dist < 1.7 && Math.random() < this.t.grab) this.setState('grabWind');
@@ -2370,7 +2411,8 @@ class Enemy {
         break;
       case 'grabbing': {
         const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
-        this.pos.x = damp(this.pos.x, P.x + fx * 0.7, 10, dt); this.pos.z = damp(this.pos.z, P.z + fz * 0.7, 10, dt);
+        _ntPrev.copy(this.pos); this.pos.x = damp(this.pos.x, P.x + fx * 0.7, 10, dt); this.pos.z = damp(this.pos.z, P.z + fz * 0.7, 10, dt);
+        collide(this.pos, this.radius, _ntPrev); noTunnel(_ntPrev, this.pos); // held in front of the player, but never inside a wall
         this.face = Math.atan2(P.x - this.pos.x, P.z - this.pos.z);
         break;
       }
@@ -2381,10 +2423,22 @@ class Enemy {
       case 'getup': if (this.st > 0.7) this.setState('chase'); break;
       case 'emerge': if (this.st > 1.2) this.setState('chase'); break;
       case 'stunned': if (this.st > 1.2) this.setState('chase'); break;
+      case 'return': // the player left this enemy's zone: walk back to where it spawned
+        if (engaged(this, dist)) { this.setState('chase'); break; }
+        if (!this.home || this.pos.distanceTo(this.home) < 1.2) { this.setState('idle'); break; }
+        moveSpeed = this.speed * 0.8; break;
+      case 'idle':
+        if (engaged(this, dist)) { this.setState('chase'); if (dist < 25) (this.t.zombie ? sfx.groan(this.pos, this.scale) : sfx.voice(this.pos, this.scale)); }
+        break;
     }
     // locomotion
     const desire = _c.set(0, 0, 0);
-    if (moveSpeed > 0) {
+    if (moveSpeed > 0 && this.state === 'return') {
+      const hx = this.home.x - this.pos.x, hz = this.home.z - this.pos.z, hd = Math.hypot(hx, hz) || 1;
+      if (pathClear(this.pos.x, this.pos.z, this.home.x, this.home.z, this.radius)) desire.set(hx / hd, 0, hz / hd);
+      else if (!navDir(this.pos, desire, homeField(this.home.x, this.home.z))) desire.set(hx / hd, 0, hz / hd);
+      desire.multiplyScalar(moveSpeed);
+    } else if (moveSpeed > 0) {
       if (this.los && dist < 22) desire.set(dx / dist, 0, dz / dist);
       else if (!navDir(this.pos, desire)) desire.set(dx / dist, 0, dz / dist);
       if (dist < 0.85) desire.set(0, 0, 0);
@@ -2398,8 +2452,14 @@ class Enemy {
     this.vel.x = damp(this.vel.x, desire.x, 6, dt); this.vel.z = damp(this.vel.z, desire.z, 6, dt);
     if (this.state === 'down' || this.state === 'stagger' || this.state === 'getup' || this.state === 'stunned') this.vel.multiplyScalar(Math.max(0, 1 - dt * 6));
     _ntPrev.copy(this.pos); this.pos.addScaledVector(this.vel, dt);
-    collide(this.pos, this.radius); noTunnel(_ntPrev, this.pos);
+    collide(this.pos, this.radius, _ntPrev); noTunnel(_ntPrev, this.pos);
+    // safety net: a body that somehow ended up outside the walkable area goes back to where it spawned
+    if ((this.outT = (this.outT || 0) + dt) > 1) {
+      this.outT = 0; const k = Math.floor(this.pos.z - NAV.org) * NAV.n + Math.floor(this.pos.x - NAV.org);
+      if (this.home && k >= 0 && k < NAV.dist.length && !NAV.blocked[k] && homeField(this.home.x, this.home.z)[k] < 0) { this.pos.copy(this.home); this.vel.set(0, 0, 0); }
+    }
     const sp = Math.hypot(this.vel.x, this.vel.z);
+    if (this.state === 'return' && sp > 0.2) this.face = dampAng(this.face, Math.atan2(this.vel.x, this.vel.z), 5, dt);
     if (this.state === 'chase' && sp > 0.2) this.face = dampAng(this.face, this.los && dist < 8 ? toFace : Math.atan2(this.vel.x, this.vel.z), 7, dt);
     this.phase += sp * dt * 3.2;
     this.animate(dt, sp);
@@ -2407,7 +2467,7 @@ class Enemy {
 
   animate(dt, sp) {
     const h = this.h, p = {}; const s = this.state;
-    if (s === 'chase' || s === 'grabWind') {
+    if (s === 'chase' || s === 'grabWind' || s === 'return') {
       p.rsx = -0.35; p.lsx = 0; p.rex = -0.4; p.tx = 0.18; p.hx = -0.1;
       if (this.isParasite) { p.rsx = -0.2; p.lsx = -0.2; p.tx = 0.3; }
       walkPose(p, this.phase, clamp(sp / 2, 0, 1.2));
@@ -2490,7 +2550,7 @@ class Enemy {
       case 'charge': {
         p.tx = 0.55; p.rsx = -0.8; walkPose(p, this.st * 16, 1.3);
         _ntPrev.copy(this.pos); this.pos.addScaledVector(this.chargeDir, (this.phase2 ? 11 : 9.5) * dt);
-        const pre = this.pos.clone(); collide(this.pos, this.radius); noTunnel(_ntPrev, this.pos);
+        const pre = this.pos.clone(); collide(this.pos, this.radius, _ntPrev); noTunnel(_ntPrev, this.pos);
         const blocked = pre.distanceToSquared(this.pos) > 0.0004 || Math.abs(this.pos.x) >= BOUND || Math.abs(this.pos.z) >= BOUND || keepInArena(this);
         const rel = _b.subVectors(P, this.pos); const ahead = rel.dot(this.chargeDir);
         if (!this.hitThisCharge && ahead > -0.5 && ahead < 1.6 && Math.abs(rel.x * this.chargeDir.z - rel.z * this.chargeDir.x) < 1.3) {
@@ -2514,7 +2574,7 @@ class Enemy {
       if (dist < 2.2 && this.state === 'chase') desire.set(0, 0, 0);
       this.vel.x = damp(this.vel.x, desire.x * speed, 5, dt); this.vel.z = damp(this.vel.z, desire.z * speed, 5, dt);
     } else if (this.state !== 'charge') this.vel.multiplyScalar(Math.max(0, 1 - dt * 6));
-    if (this.state !== 'charge') { _ntPrev.copy(this.pos); this.pos.addScaledVector(this.vel, dt); if (this.state !== 'intro') { collide(this.pos, this.radius); noTunnel(_ntPrev, this.pos); } keepInArena(this); }
+    if (this.state !== 'charge') { _ntPrev.copy(this.pos); this.pos.addScaledVector(this.vel, dt); if (this.state !== 'intro') { collide(this.pos, this.radius, _ntPrev); noTunnel(_ntPrev, this.pos); } keepInArena(this); }
     const sp = this.state === 'charge' ? 9 : Math.hypot(this.vel.x, this.vel.z);
     if (this.state === 'chase' || this.state === 'intro') { this.face = dampAng(this.face, this.state === 'intro' ? 0 : toFace, 4, dt); walkPose(p, this.phase, clamp(sp / 1.6, 0, 1)); p.rsx = (p.rsx || 0) - 0.3; p.tx = (p.tx || 0) + 0.15; }
     this.phase += sp * dt * 2.2;
@@ -2810,11 +2870,20 @@ class Croc {
     };
     switch (this.state) {
       case 'lurk':
+        if (!engaged(this, dist)) { // out of its zone: swim back home and wait
+          if (this.home && this.pos.distanceTo(this.home) > 1.5) {
+            const hx = this.home.x - this.pos.x, hz = this.home.z - this.pos.z;
+            _a.set(hx, 0, hz).normalize(); const nd = navDir(this.pos, _c, homeField(this.home.x, this.home.z)); if (nd && !pathClear(this.pos.x, this.pos.z, this.home.x, this.home.z, this.radius, 1)) _a.copy(nd);
+            this.face = dampAng(this.face, Math.atan2(_a.x, _a.z), 4, dt); speed = this.speed * 0.7;
+          }
+          break;
+        }
         speed = this.speed; steer();
         if ((this.bubbleT -= dt) <= 0) { this.bubbleT = rand(0.6, 1.4); particlesN.add(this.pos.x + rand(-.3, .3), W + 0.02, this.pos.z + rand(-.3, .3), 0, 0.15, 0, 0.6, 0.04, 0.14, 0.5, 0.48, 0.4, 0.5, 0, 1); }
         if (dist < 10 && this.cd <= 0 && !player.dead) { this.setState('stalk'); sfx.splash(this.pos, 0.3); }
         break;
       case 'stalk':
+        if (!engaged(this, dist)) { this.setState('lurk'); break; }
         speed = this.speed * 1.25; targetY = CROC_DEPTH.stalk; steer();
         // a foamy wake around the fin
         for (let i = 0; i < 2; i++) if (Math.random() < dt * 14) { const sd = Math.random() < 0.5 ? -1 : 1, fx = Math.cos(this.face) * sd, fz = -Math.sin(this.face) * sd; particlesN.add(this.hb.fin.x + fx * 0.2, W + 0.04, this.hb.fin.z + fz * 0.2, fx * 0.8, 0.4, fz * 0.8, 0.7, 0.06, 0.3, 0.85, 0.82, 0.72, 0.75, 2, 1.5); }
@@ -2847,7 +2916,7 @@ class Croc {
     _ntPrev.copy(this.pos);
     if (this.state === 'bite') this.pos.addScaledVector(this.vel, speed * dt);
     else if (speed) { this.pos.x += Math.sin(this.face) * speed * dt; this.pos.z += Math.cos(this.face) * speed * dt; }
-    collide(this.pos, this.radius); noTunnel(_ntPrev, this.pos);
+    collide(this.pos, this.radius, _ntPrev); noTunnel(_ntPrev, this.pos);
     // pose
     this.y = damp(this.y, targetY, this.state === 'lurk' ? 2 : 6, dt); this.roll = damp(this.roll, roll, 5, dt);
     h.root.visible = this.y > -1.2;
@@ -2861,13 +2930,19 @@ class Croc {
 }
 function spawnEnemy(type) {
   let cands = (STAGE.waves[director.wave]?.spawns || STAGE.spawns).map(([x, z]) => ({ x, z, d: Math.hypot(x - player.pos.x, z - player.pos.z) })).filter(s => s.d > 16).sort(() => Math.random() - 0.5);
+  if (STAGE.zones) { // spawn in the zone the player is in, so the fight comes to them
+    const pz = zoneOf(player.pos.x, player.pos.z), all = (STAGE.waves[director.wave]?.spawns || STAGE.spawns).map(([x, z]) => ({ x, z, d: Math.hypot(x - player.pos.x, z - player.pos.z) })).sort(() => Math.random() - 0.5);
+    const mine = all.filter(s => zoneOf(s.x, s.z) === pz), far = mine.filter(s => s.d > 16), mid = mine.filter(s => s.d > 10);
+    if (far.length) cands = far; else if (mid.length) cands = mid;
+  }
   if (STAGE.navSpawn) { // mazes: only spawn where the walk to the player is short, not just the straight-line distance
     const near = cands.filter(s => { const k = Math.floor(s.z - NAV.org) * NAV.n + Math.floor(s.x - NAV.org), d = NAV.dist[k]; return d >= 0 && d <= STAGE.navSpawn; });
     if (near.length) cands = near;
   }
   const s = cands[0] || { x: STAGE.spawns[0][0], z: STAGE.spawns[0][1] };
   const pos = new V3(s.x + rand(-1.5, 1.5), 0, s.z + rand(-1.5, 1.5)); collide(pos, 0.4);
-  const e = type === 'croc' ? new Croc(pos.x, pos.z) : new Enemy(type, pos.x, pos.z, STAGE.waves[director.wave]); enemies.push(e); return e;
+  const e = type === 'croc' ? new Croc(pos.x, pos.z) : new Enemy(type, pos.x, pos.z, STAGE.waves[director.wave]);
+  e.home = new V3(s.x, 0, s.z); e.zone = zoneOf(s.x, s.z); enemies.push(e); return e;
 }
 function startWave(i, fromContinue) {
   director.wave = i; director.phase = 'intro'; director.introT = 3.5; director.spawned = 0; director.spawnT = 1.2; director.bossDead = false; director.boss = null; director.extraSpawns = 0;
@@ -3003,7 +3078,7 @@ function startGrab(e) {
 }
 function releaseGrab(escaped) {
   const e = player.grabbedBy; player.grabbedBy = null; hideQTE(); player.invuln = 0.9;
-  if (e && e.alive) { if (escaped) { e.setState('stagger'); e.staggerKind = 'head'; e.stDur = 1.6; const d = _a.subVectors(e.pos, player.pos).setY(0).normalize(); e.pos.addScaledVector(d, 0.6); } else e.setState('recover'); }
+  if (e && e.alive) { if (escaped) { e.setState('stagger'); e.staggerKind = 'head'; e.stDur = 1.6; const d = _a.subVectors(e.pos, player.pos).setY(0).normalize(); _ntPrev.copy(e.pos); e.pos.addScaledVector(d, 0.6); collide(e.pos, e.radius, _ntPrev); noTunnel(_ntPrev, e.pos); } else e.setState('recover'); }
 }
 function guardRecoil(e, just) {
   if (!e || !e.alive) return;
@@ -3514,11 +3589,11 @@ function updatePlayer(dt) {
   const acc = p.state === 'stumble' ? 3 : 12;
   p.vel.x = damp(p.vel.x, tvx, acc, dt); p.vel.z = damp(p.vel.z, tvz, acc, dt);
   _ntPrev.copy(p.pos); p.pos.addScaledVector(p.vel, dt);
-  collide(p.pos, 0.35); noTunnel(_ntPrev, p.pos);
+  collide(p.pos, 0.35, _ntPrev); noTunnel(_ntPrev, p.pos);
   for (const e of enemies) {
     if (!e.alive || e.state === 'down' || e.ghost) continue;
     const dx = p.pos.x - e.pos.x, dz = p.pos.z - e.pos.z, d = Math.hypot(dx, dz), rr = 0.35 + e.radius;
-    if (d < rr && d > 1e-4) { p.pos.x += dx / d * (rr - d); p.pos.z += dz / d * (rr - d); }
+    if (d < rr && d > 1e-4) { _b.copy(p.pos); p.pos.x += dx / d * (rr - d); p.pos.z += dz / d * (rr - d); collide(p.pos, 0.35, _b); }
   }
   if (p.state === 'stumble' && p.stateT > 0.5) p.state = 'normal';
   const sp = Math.hypot(p.vel.x, p.vel.z);

@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
   await p.goto('http://localhost:8766/?low&' + Date.now()); await p.waitForTimeout(800);
   for (const stage of ['village', 'city']) {
     const r = await p.evaluate((stage) => {
-      const g = window.__game; g.startGame(stage); g.director.phase = 'rest';
+      const g = window.__game; g.startGame(stage); g.stage.zones = null; g.director.phase = 'rest';
       const out = [];
       for (const pos of [[0,0],[-20,0],[0,-20],[12,25]]) {
         for (const e of g.enemies) { e.dead = true; e.removeT = 99; } g.sim(0.1);

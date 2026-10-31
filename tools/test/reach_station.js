@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
   const PTS = { stationIn: [[0,4],[-36,0],[32,0],[0,-30],[-36,-22]], sewer: [[4,38],[-36,-36],[36,-36],[4,4],[-36,28]], subway: [[-8,39],[0,30],[0,5],[0,-12],[0,-30]], lab: [[0,38],[0,22],[0,0],[-30,3],[30,3],[0,-22]] };
   for (const stage of (process.argv[2] ? process.argv[2].split(',') : ['stationIn', 'sewer', 'subway', 'lab'])) {
     const r = await p.evaluate(([stage, PTS]) => {
-      const g = window.__game; g.startGame(stage); g.inv.gold=1; g.director.phase = 'rest';
+      const g = window.__game; g.startGame(stage); g.stage.zones = null; g.inv.gold=1; g.director.phase = 'rest';
       const out = [];
       for (const pos of PTS[stage]) {
         for (const e of g.enemies) { e.dead = true; e.removeT = 99; } g.sim(0.1);

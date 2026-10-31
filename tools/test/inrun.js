@@ -12,6 +12,9 @@ const { chromium } = require('playwright');
       P.hp = 100; if (P.dead) { P.dead = false; P.state = 'normal'; }
       if (g.director.wave !== lastWave) { lastWave = g.director.wave; log.push(`step ${i}: wave ${lastWave} (${g.stage.waves[lastWave].sub})`); const d = g.stage.arenaDoor; if (g.stage.waves[lastWave].boss && d) P.pos.set(d[0], 0, d[1] - 2.5); }
       let best = null, bd = 1e9; for (const e of g.enemies) { if (!e.alive) continue; const d = e.pos.distanceTo(P.pos); if (d < bd) { bd = d; best = e; } }
+      // enemies wait in their own zone: when only waiting ones are left, walk (teleport) over to them
+      const waiting = e => e.state === 'idle' || e.state === 'return';
+      if (best && waiting(best)) { const act = g.enemies.filter(e => e.alive && !waiting(e)); if (act.length) { best = act.sort((a, b) => a.pos.distanceTo(P.pos) - b.pos.distanceTo(P.pos))[0]; bd = best.pos.distanceTo(P.pos); } else if (i % 10 === 0 && best.home) P.pos.set(best.home.x, 0, best.home.z); }
       g.input.aim = false; g.input.fire = false;
       if (best) {
         // walk toward the target if far (follow nav-free straight line, good enough in open rooms)
@@ -25,7 +28,7 @@ const { chromium } = require('playwright');
       g.sim(0.1);
       if (g.director.phase === 'rest') { log.push(`  cleared at step ${i}, kills ${g.stats.kills}`); window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter' })); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Enter' })); }
       if (g.game.state === 'win') { log.push('WIN at ' + i); break; }
-      if (i === 11999) log.push('TIMEOUT phase ' + g.director.phase + ' alive ' + g.enemies.filter(e => e.alive).map(e => e.type + '@' + e.pos.x.toFixed(1) + ',' + e.pos.z.toFixed(1) + ':' + e.state + ':hp' + Math.round(e.hp)).join(' '));
+      if (i === 11999) log.push('TIMEOUT player ' + P.pos.x.toFixed(1) + ',' + P.pos.z.toFixed(1) + ' phase ' + g.director.phase + ' alive ' + g.enemies.filter(e => e.alive).map(e => e.type + '@' + e.pos.x.toFixed(1) + ',' + e.pos.z.toFixed(1) + ':' + e.state + ':hp' + Math.round(e.hp) + ':z' + e.zone + (e.home ? ':home' + e.home.x + ',' + e.home.z : '')).join(' '));
     }
     return log;
   }, process.argv[3] || 'stationIn');
