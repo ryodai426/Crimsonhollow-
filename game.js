@@ -3792,8 +3792,11 @@ function buildCine() {
   part(cab, 0.7, 0.12, 0.9, panel, 0, 1.72, -1.05);
   for (let i = 0; i < 8; i++) { const b = new THREE.Mesh(boxGeo(0.03, 0.02, 0.03), new THREE.MeshBasicMaterial({ color: i % 3 ? 0x40ff60 : 0xffb020 })); b.position.set(-0.25 + (i % 4) * 0.16, 1.655, -1.3 + Math.floor(i / 4) * 0.3); cab.add(b); cine.buttons.push(b); }
   const seat = (x, z, hb = 0.8) => { part(cab, 0.55, 0.45, 0.5, seatM, x, 0.22, z); part(cab, 0.55, hb, 0.12, seatM, x, 0.45 + hb / 2, z + 0.3); };
-  seat(-0.5, -0.75); seat(0.5, -0.75); seat(-0.6, 1.15, 0.5); seat(0.6, 1.15, 0.5);
-  part(cab, 0.5, 0.35, 0.4, mat(0x3a3a2a), 0.6, 0.62, 1.1); part(cab, 0.06, 0.6, 0.06, mat(0x222222), 0, 0.3, -0.35); // gear bag, cyclic
+  seat(-0.5, -0.75); seat(0.5, -0.75);
+  // a long bench along the left wall (the hero sits on it sideways, facing the right wall)
+  part(cab, 0.5, 0.45, 2.7, seatM, -0.95, 0.22, 1.55); part(cab, 0.1, 0.62, 2.7, seatM, -1.14, 0.76, 1.55);
+  for (const z of [0.6, 1.5, 2.4]) part(cab, 0.48, 0.02, 0.04, mat(0x1a1a1a), -0.95, 0.455, z);
+  part(cab, 0.5, 0.35, 0.4, mat(0x3a3a2a), 0.75, 0.18, 1.7); part(cab, 0.06, 0.6, 0.06, mat(0x222222), 0, 0.3, -0.35); // gear bag, cyclic
   for (let i = 0; i < 4; i++) part(cab, 0.02, 0.02, 2.4, mat(0x6a6a5a), 1.13, 0.6 + i * 0.25, 1.9); // cargo net
   { const l = new THREE.PointLight(0xdfe8f0, 2.2, 6, 1.5); l.position.set(0.3, 1.25, 2.2); cab.add(l); const p = new THREE.PointLight(0x70ff90, 1.2, 2.5, 1.5); p.position.set(0, 1.0, -1.4); cab.add(p); }
   // cast: the hero (same look as in play) and two pilots
@@ -3802,7 +3805,7 @@ function buildCine() {
   part(doc, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, 0); part(doc, 0.21, 0.28, 0.005, mat(0xd8d2c0), 0, 0, 0.01); part(doc, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.09, 0.014);
   const copilot = makeHumanoid(pilotLook(0x4a5038)), pilot = makeHumanoid(pilotLook(0x464c36));
   addHelmet(copilot); addHelmet(pilot);
-  for (const [h, x, z] of [[hero, -0.6, 1.08], [copilot, -0.5, -0.83], [pilot, 0.5, -0.83]]) { h.root.position.set(x, 0, z); h.root.rotation.y = Math.PI; cab.add(h.root); charify(h.root); }
+  for (const [h, x, z, ry] of [[hero, -0.92, 1.35, Math.PI / 2], [copilot, -0.5, -0.83, Math.PI], [pilot, 0.5, -0.83, Math.PI]]) { h.root.position.set(x, 0, z); h.root.rotation.y = ry; cab.add(h.root); charify(h.root); }
   Object.assign(cine, { hero, copilot, pilot });
 }
 function drawRadar(t) {
@@ -3817,49 +3820,78 @@ function drawRadar(t) {
 const talk = (t, a, b) => (t > a && t < b ? Math.sin((t - a) * 9) * 0.035 + Math.sin((t - a) * 3.1) * 0.03 : 0);
 
 // ---- STAGE 1 opening ----
+// small, irregular cabin vibration (layered shakes plus the odd bump of turbulence) - kept tiny so nobody gets sick
+function cabinShake(T) {
+  const h = i => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  const k = Math.floor(T / 1.3), u = T / 1.3 - k, bump = h(k) > 0.55 ? Math.sin(Math.PI * clamp(u * 3, 0, 1)) * (0.6 + h(k + 7) * 0.4) : 0;
+  const n = (a, f, p) => Math.sin(T * f + p) * a;
+  return {
+    x: n(0.0025, 31.7, 0) + n(0.0015, 52.3, 1.3) + bump * 0.004 * Math.sin(T * 23),
+    y: n(0.003, 27.1, 2.1) + n(0.0015, 61.7, 0.4) + bump * 0.01 * Math.sin(T * 19 + 1),
+    roll: n(0.0018, 13.3, 0.7) + bump * 0.005 * Math.sin(T * 17),
+  };
+}
+const C1 = 7, C2 = 14; // cut 2 starts at 7 s, cut 3 at 14 s
 const MOVIES = {
   stage1: {
-    dur: 22.5,
+    dur: 25,
     subs: [
-      [7.1, 10.9, '副操縦士', '自動運転、解除します。ここからは手動で目的地まで向かいます。'],
-      [12.0, 16.0, '操縦士', 'にしても、今回の任務は不気味ですよね。カーヴァーさんも、あんまり気乗りしないでしょう。'],
-      [16.3, 18.4, '副操縦士', 'いわゆる貧乏くじってやつですね。'],
-      [18.6, 22.2, '副操縦士', 'カーヴァーさんも出世街道を渡っているから、上からの指令は無下にはできませんよね。'],
+      [9.6, 13.4, '副操縦士', '自動運転、解除します。ここからは手動で目的地まで向かいます。'],
+      [14.5, 18.5, '操縦士', 'にしても、今回の任務は不気味ですよね。カーヴァーさんも、あんまり気乗りしないでしょう。'],
+      [18.8, 20.9, '副操縦士', 'いわゆる貧乏くじってやつですね。'],
+      [21.1, 24.7, '副操縦士', 'カーヴァーさんも出世街道を渡っているから、上からの指令は無下にはできませんよね。'],
     ],
-    fade: t => Math.max(1 - seg(t, 0, 0.6), seg(t, 3.9, 4.5) * (t < 4.5 ? 1 : 0), t >= 4.5 ? 1 - seg(t, 4.5, 5.1) : 0, seg(t, 21.9, 22.5)),
-    sound: t => (t < 4.5 ? 'out' : 'in'),
-    render(t) {
-      const ext = t < 4.5; cine.ext.visible = ext; cine.cab.visible = !ext;
-      if (ext) this.cut1(t); else if (t < 11.5) this.cut2(t - 4.5); else this.cut3(t - 11.5);
+    fade: t => Math.max(1 - seg(t, 0, 0.6), t < C1 ? seg(t, 6.75, C1) : 0, t >= C1 ? 1 - seg(t, C1, C1 + 0.6) : 0, seg(t, 24.4, 25)),
+    sound: t => (t < C1 ? 'out' : 'in'),
+    // outside, the rotor gets louder and brighter as the helicopter comes close, and pans as it passes overhead
+    level(t) {
+      if (t >= C1) return null;
+      const H = cine.heli.g.position, d = cineCam.position.distanceTo(H) || 1;
+      const right = _a.set(1, 0, 0).applyQuaternion(cineCam.quaternion), pan = clamp(_b.subVectors(H, cineCam.position).normalize().dot(right), -1, 1) * 0.7;
+      return { vol: clamp(10 / (d + 6), 0.1, 1.3), lp: 220 + 900 / (1 + d / 6), pan };
     },
-    // カット1：雲の中から、揺れるヘリの正面が現れる
+    render(t) {
+      const ext = t < C1; cine.ext.visible = ext; cine.cab.visible = !ext;
+      if (ext) this.cut1(t); else if (t < C2) this.cut2(t - C1); else this.cut3(t - C2);
+    },
+    // カット1（7秒）：雲の中から、揺れるヘリの正面が近づいてくる。最後の1秒でカメラの上を越えて後ろへ飛び去り、カメラはそれを追う
     cut1(t) {
       cineScene.fog.color.setHex(0x7a828a); cineScene.fog.density = 0.034; cineScene.background.setHex(0x7a828a);
       for (const c of cine.clouds) { const z = ((c.z + t * c.v + 100) % 106) - 100; c.s.position.set(c.x, c.y + 1.5, z); }
-      const H = cine.heli, k = easeIO(seg(t, 1.9, 4.2));
-      H.g.position.set(Math.sin(t * 1.1) * 0.3, 0.6 + Math.sin(t * 1.3) * 0.25, t < 1.9 ? -120 : lerp(-55, -13, k));
-      H.g.rotation.set(-0.12 + Math.sin(t * 1.7) * 0.04, Math.sin(t * 0.8) * 0.05, Math.sin(t * 2.1) * 0.07 + Math.sin(t * 5.3) * 0.02);
+      const H = cine.heli, wob = Math.sin(t * 1.3) * 0.25, u = seg(t, 6.0, 7.0);
+      let x = Math.sin(t * 1.1) * 0.3, y = 0.6 + wob, z;
+      if (t < 1.9) z = lerp(-80, -58, t / 1.9);                       // still hidden in the cloud
+      else if (t < 4.4) z = lerp(-58, -13, easeIO(seg(t, 1.9, 4.4)));  // coming out of it
+      else z = -13 + Math.sin(t * 0.9) * 0.6;                          // hanging in front of the camera, swaying in the wind
+      if (u > 0) { z = lerp(z, 26, Math.pow(u, 1.35)); y = lerp(y, 7.8, easeIO(u)); x = lerp(x, 1.6, u); } // over the camera and away
+      H.g.position.set(x, y, z);
+      H.g.rotation.set(-0.12 - u * 0.2 + Math.sin(t * 1.7) * 0.04, Math.sin(t * 0.8) * 0.05, Math.sin(t * 2.1) * 0.07 + Math.sin(t * 5.3) * 0.02);
       H.rotor.rotation.y = t * 29; H.tail.rotation.x = t * 61; H.beacon.visible = (t * 1.4) % 1 < 0.18;
-      cineCam.position.set(Math.sin(t * 13) * 0.03, 1.6 + Math.sin(t * 17) * 0.02, 0); cineCam.lookAt(0, 1.8, -20); cine.fov = 46;
+      cineCam.position.set(Math.sin(t * 13) * 0.03, 1.6 + Math.sin(t * 17) * 0.02, 0);
+      const follow = easeIO(seg(t, 5.8, 6.3)), tgt = _c.set(0, 1.8, -20).lerp(_a.set(x, y + 1.2, z), follow); // pan with it as it passes
+      cineCam.lookAt(tgt); cine.fov = 46;
     },
-    // カット2：キャビンを後ろから。資料を読む主人公、計器を確かめる副操縦士、「自動運転、解除します」、うなずく操縦士
-    cut2(t) { this.cabin(t + 4.5); const C = cine.cab.position, j = Math.sin(t * 47) * 0.004;
-      cineCam.position.set(C.x + 0.55 + Math.sin(t * 0.7) * 0.03, 1.6 + Math.sin(t * 1.1) * 0.02 + j, 3.25); cineCam.lookAt(C.x - 0.3, 0.95, -1.4); cine.fov = 60; },
-    // カット3：キャビンからコックピットへズーム。操縦士と副操縦士の会話
-    cut3(t) { this.cabin(t + 11.5); const C = cine.cab.position, k = easeIO(seg(t, 0, 4)), j = Math.sin(t * 47) * 0.004;
-      cineCam.position.set(C.x + lerp(0.2, 0.0, k), lerp(1.6, 1.62, k) + j, lerp(2.6, 0.65, k)); cineCam.lookAt(C.x, lerp(1.0, 1.08, k), -1.7); cine.fov = lerp(60, 52, k); },
+    // カット2（7秒）：キャビンを後ろから。ロングシートに横向きに座って資料を読む主人公、計器を確かめる副操縦士、「自動運転、解除します」、うなずく操縦士
+    cut2(t) { this.cabin(t + C1); const C = cine.cab.position, v = cabinShake(t + C1);
+      cineCam.position.set(C.x + 0.5 + Math.sin(t * 0.7) * 0.03 + v.x, 1.6 + Math.sin(t * 1.1) * 0.02 + v.y, 3.25); cineCam.lookAt(C.x - 0.3, 0.95, -1.4); cineCam.rotateZ(v.roll); cine.fov = 60; },
+    // カット3（11秒）：キャビンからコックピットへズーム。操縦士と副操縦士の会話
+    cut3(t) { this.cabin(t + C2); const C = cine.cab.position, k = easeIO(seg(t, 0, 4)), v = cabinShake(t + C2);
+      cineCam.position.set(C.x + lerp(0.2, 0.0, k) + v.x, lerp(1.6, 1.62, k) + v.y, lerp(2.6, 0.65, k)); cineCam.lookAt(C.x, lerp(1.0, 1.08, k), -1.7); cineCam.rotateZ(v.roll); cine.fov = lerp(60, 52, k); },
     // the cabin at movie time T (shared by cuts 2 and 3)
     cabin(T) {
       cineScene.fog.color.setHex(0x2a2e32); cineScene.fog.density = 0.01; cineScene.background.setHex(0x2a2e32);
       cine.skyTex.offset.set(T * 0.25, Math.sin(T * 0.6) * 0.02); drawRadar(T);
       cine.buttons.forEach((b, i) => { b.visible = ((T * (0.7 + (i % 5) * 0.31) + i * 0.37) % 1) < 0.7; });
-      // the hero: reads the file, then rests it on his knee and looks out of the window, thinking
-      const r = easeIO(seg(T, 8.2, 9.4)), hp = SEAT();
-      Object.assign(hp, { rsx: lerp(-1.05, -0.5, r), rex: lerp(-1.35, -0.45, r), lsx: lerp(-0.55, -0.4, r), lex: lerp(-0.95, -0.35, r), lsz: 0.15, tx: lerp(0.14, 0.04, r), hx: lerp(0.5, 0.05, r), hy: lerp(0, 0.6, easeIO(seg(T, 9.0, 10.4))) });
+      T -= 2.5; // the cabin timings below were laid out for a cut 1 of 4.5 s
+      // the hero, sideways on the long seat: reads the file, rests it on his knee and thinks; turns a little toward the cockpit when they talk to him
+      const r = easeIO(seg(T, 8.2, 9.4)), toPilots = easeIO(seg(T, 12.8, 13.6)) * (1 - easeIO(seg(T, 21.6, 22.4))), hp = SEAT();
+      Object.assign(hp, { rsx: lerp(-1.05, -0.5, r), rex: lerp(-1.35, -0.45, r), lsx: lerp(-0.55, -0.4, r), lex: lerp(-0.95, -0.35, r), lsz: 0.15,
+        tx: lerp(0.14, 0.06, r), hx: lerp(0.5, 0.22, r) - toPilots * 0.15, hy: -0.2 * easeIO(seg(T, 9.0, 10.4)) * (1 - toPilots) + toPilots * 0.75, ty: toPilots * 0.2 });
       setPose(cine.hero, hp);
       // co-pilot: checks the buttons and the radar, then speaks
       const reach = Math.sin(Math.PI * seg(T, 5.2, 7.0)), cp = SEAT();
-      Object.assign(cp, { rsx: lerp(-0.6, -1.4, reach) + Math.sin(T * 10) * 0.04 * reach, rex: lerp(-0.8, -0.15, reach), lsx: -0.55, lex: -0.9, hx: lerp(0.1, 0.35, reach) + talk(T, 7.1, 10.9) + talk(T, 16.3, 22.2), hy: lerp(0, -0.25, seg(T, 7.0, 7.4)) - 0.55 * Math.sin(Math.PI * seg(T, 16.0, 22.4)) + 1.6 * Math.sin(Math.PI * seg(T, 19.4, 21.6)), ty: 0.35 * Math.sin(Math.PI * seg(T, 19.4, 21.6)) });
+      Object.assign(cp, { rsx: lerp(-0.6, -1.4, reach) + Math.sin(T * 10) * 0.04 * reach, rex: lerp(-0.8, -0.15, reach), lsx: -0.55, lex: -0.9, hx: lerp(0.1, 0.35, reach) + talk(T, 7.1, 10.9) + talk(T, 16.3, 22.2),
+        hy: lerp(0, -0.25, seg(T, 7.0, 7.4)) - 0.55 * Math.sin(Math.PI * seg(T, 16.0, 22.4)) + 1.6 * Math.sin(Math.PI * seg(T, 19.4, 21.6)), ty: 0.35 * Math.sin(Math.PI * seg(T, 19.4, 21.6)) });
       setPose(cine.copilot, cp);
       // pilot: hands on the controls, nods at the co-pilot, then glances back at the hero while he speaks
       const nod = Math.sin(Math.PI * seg(T, 10.9, 11.4)) * 0.3, back = Math.sin(Math.PI * seg(T, 13.6, 16.2)), pp = SEAT();
@@ -3881,16 +3913,22 @@ function heliSound(mode) {
     const amp = ctx.createGain(); amp.gain.value = 0.35;
     const lfo = ctx.createOscillator(); lfo.type = 'sawtooth'; lfo.frequency.value = 5.2; const depth = ctx.createGain(); depth.gain.value = 0.3; lfo.connect(depth); depth.connect(amp.gain);
     const whine = ctx.createOscillator(); whine.type = 'sine'; whine.frequency.value = 1180; const wg = ctx.createGain(); wg.gain.value = 0.0;
-    const master = out(0.0, 0, 0.05);
+    const master = ctx.createGain(); master.gain.value = 0; const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    if (pan) { master.connect(pan); pan.connect(out(1, 0, 0.05)); } else master.connect(out(1, 0, 0.05));
     src.connect(lp); lp.connect(amp); amp.connect(master); whine.connect(wg); wg.connect(master);
     src.start(); lfo.start(); whine.start();
-    cineHeli = { src, lfo, whine, lp, wg, master };
+    cineHeli = { src, lfo, whine, lp, wg, master, pan };
   }
   const t = ctx.currentTime, H = cineHeli;
   if (mode === 'off') { H.master.gain.setTargetAtTime(0, t, 0.3); setTimeout(() => { try { H.src.stop(); H.lfo.stop(); H.whine.stop(); } catch (e) { } }, 1500); cineHeli = null; return; }
-  H.master.gain.setTargetAtTime(mode === 'out' ? 0.9 : 0.75, t, 0.25);
+  if (mode === 'in' && H.pan) H.pan.pan.setTargetAtTime(0, t, 0.2);
+  H.master.gain.setTargetAtTime(mode === 'out' ? 0.15 : 0.75, t, 0.25);
   H.lp.frequency.setTargetAtTime(mode === 'out' ? 380 : 190, t, 0.2);
   H.wg.gain.setTargetAtTime(mode === 'out' ? 0.01 : 0.025, t, 0.2);
+}
+function heliLevel(L) {
+  const H = cineHeli; if (!H || !L) return; const t = AC.ctx.currentTime;
+  H.master.gain.setTargetAtTime(L.vol, t, 0.06); H.lp.frequency.setTargetAtTime(L.lp, t, 0.06); if (H.pan) H.pan.pan.setTargetAtTime(L.pan, t, 0.06);
 }
 function playMovie(id, onEnd) {
   buildCine(); initAudio();
@@ -3908,6 +3946,7 @@ function renderCine(t) {
   const i = M.subs.findIndex(s => t >= s[0] && t < s[1]);
   if (i !== cine.sub) { cine.sub = i; setH('cineWho', i < 0 ? '' : M.subs[i][2]); setH('cineLine', i < 0 ? '' : M.subs[i][3]); }
   const snd = M.sound(t); if (snd !== cine.sound) { cine.sound = snd; heliSound(snd); }
+  if (M.level) heliLevel(M.level(t));
 }
 function updateCine(dt) {
   if (!cine.paused) cine.t += dt;

@@ -5,10 +5,11 @@ const { chromium } = require('playwright');
   const SP = process.argv[2], id = process.argv[3] || 'stage1';
   const p = await b.newPage({ viewport: { width: 800, height: 600 } }); const errs = []; p.on('pageerror', e => errs.push(e.message + ' ' + e.stack));
   await p.goto('http://localhost:8766/?' + Date.now()); await p.waitForTimeout(1500);
-  const times = [0.9, 2.4, 3.3, 4.2, 5.5, 8.0, 9.5, 10.2, 11.1, 12.0, 13.5, 15.0, 17.0, 20.0, 21.0];
+  const times = (process.argv[4] || '1,3,4,5,6,6.3,6.5,6.7,6.9,8,11,12.5,15,18,22.5').split(',').map(Number);
   await p.evaluate(id => { const g = window.__game; g.playMovie(id, () => window.__ended = true); g.cine.paused = true; }, id);
   for (const t of times) {
-    await p.evaluate(t => { const g = window.__game; g.cine.t = t; g.renderCine(t); }, t);
+    const lv = await p.evaluate(t => { const g = window.__game; g.cine.t = t; g.renderCine(t); const L = g.cine.movie.level && g.cine.movie.level(t); return L ? `vol ${L.vol.toFixed(2)} lp ${L.lp.toFixed(0)} pan ${L.pan.toFixed(2)}` : 'inside'; }, t);
+    console.log(`t=${t}: sound ${lv}`);
     await p.waitForTimeout(900);
     await p.screenshot({ path: `${SP}/movie-${t.toFixed(1).padStart(4, '0')}.png` });
   }
