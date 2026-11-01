@@ -3802,7 +3802,7 @@ function buildCine() {
   // cast: the hero (same look as in play) and two pilots
   const hero = makeHumanoid({ shirt: mat(0x5a3a22, { rough: 0.6 }), sleeve: mat(0x5a3a22, { rough: 0.6 }), vest: mat(0x2a2620), pants: mat(0x2a3240), skin: mat(0xc9a07e), hair: mat(0x3a2818), hairBack: true, glove: mat(0x1a1612), boots: mat(0x1e1712) });
   const doc = grp(hero.armR.hand, 0, -0.06, 0.06); doc.rotation.x = -1.1;
-  part(doc, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, 0); part(doc, 0.21, 0.28, 0.005, mat(0xd8d2c0), 0, 0, 0.01); part(doc, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.09, 0.014);
+  part(doc, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, 0); cine.docPaper = part(doc, 0.21, 0.28, 0.005, mat(0xd8d2c0), 0, 0, 0.01); cine.doc = doc; part(doc, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.09, 0.014);
   const copilot = makeHumanoid(pilotLook(0x4a5038)), pilot = makeHumanoid(pilotLook(0x464c36));
   addHelmet(copilot); addHelmet(pilot);
   for (const [h, x, z, ry] of [[hero, -0.92, 1.35, Math.PI / 2], [copilot, -0.5, -0.83, Math.PI], [pilot, 0.5, -0.83, Math.PI]]) { h.root.position.set(x, 0, z); h.root.rotation.y = ry; cab.add(h.root); charify(h.root); }
@@ -3820,8 +3820,10 @@ function buildCine() {
     g.lineWidth = 3; g.beginPath(); g.moveTo(205, 40); g.lineTo(192, 56); g.stroke();
     g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 2; for (const x of [85, 171]) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, s); g.stroke(); } g.beginPath(); g.moveTo(0, 128); g.lineTo(s, 128); g.stroke(); // folds
   });
-  cine.map = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.3), new THREE.MeshStandardMaterial({ map: mapTex, roughness: 0.9, side: THREE.DoubleSide }));
-  cine.map.visible = false; cab.add(cine.map);
+  // the file he reads in cuts 2-3 IS the map: the same board, paper and tab, shown in his left hand from cut 4 on
+  const mapM = new THREE.MeshStandardMaterial({ map: mapTex, roughness: 0.9 }); cine.docPaper.material = mapM;
+  cine.map = new THREE.Group(); cine.map.visible = false; cab.add(cine.map);
+  part(cine.map, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, -0.012); part(cine.map, 0.21, 0.28, 0.005, mapM, 0, 0, 0); part(cine.map, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.15, 0.003);
 }
 function drawRadar(t) {
   const { g, c, tex } = cine.radar, s = c.width, a = t * 2.4;
@@ -3846,7 +3848,7 @@ function cabinShake(T) {
     roll: n(0.0018, 13.3, 0.7) + bump * 0.005 * Math.sin(T * 17),
   };
 }
-const C1 = 7, C2 = 14, C3 = 25, C4 = 31; // cut 2 starts at 7 s, cut 3 at 14 s, cut 4 at 25 s, cut 6 at 31 s
+const C1 = 7, C2 = 14, C3 = 25, C4 = 31; // cut 2 starts at 7 s, cut 3 at 14 s, cut 4 at 25 s, cut 5 at 31 s
 const COCKPIT_CAM = new V3(0.05, 1.5, -2.02), COCKPIT_LOOK = new V3(-0.25, 1.05, 1.4); // cut 4 (inside the cockpit, looking back)
 const MOVIES = {
   stage1: {
@@ -3857,10 +3859,10 @@ const MOVIES = {
       [18.8, 20.9, '副操縦士', 'いわゆる貧乏くじってやつですね。'],
       [21.1, 24.7, '副操縦士', 'カーヴァーさんも出世街道を渡っているから、上からの指令は無下にはできませんよね。'],
       [27.5, 31.0, '操縦士', 'ただ、今回の任務は前任者が失踪したとかで、奇妙さでいったら折り紙付きです。'],
-      [31.6, 34.8, '操縦士', 'そこの村、たった一晩で住民全員が消えてしまったそうです。'],
-      [35.0, 38.6, '操縦士', '第一発見者が言うには、消える直前、彼らの目が赤いとか、燃えてるとかなんとか…'],
-      [38.8, 41.6, '操縦士', '錯乱状態にあったので、どこまで信じていいのか分かりませんが。'],
-      [41.8, 44.6, '副操縦士', 'もちろんカーヴァーさんは戻ってくると信じてますから。'],
+      [31.3, 34.1, '副操縦士', 'もちろんカーヴァーさんは戻ってくると信じてますから。'],
+      [34.4, 37.6, '操縦士', 'そこの村、たった一晩で住民全員が消えてしまったそうです。'],
+      [37.8, 41.4, '操縦士', '第一発見者が言うには、消える直前、彼らの目が赤いとか、燃えてるとかなんとか…'],
+      [41.6, 44.6, '操縦士', '錯乱状態にあったので、どこまで信じていいのか分かりませんが。'],
     ],
     fade: t => Math.max(1 - seg(t, 0, 0.6), t < C1 ? seg(t, 6.75, C1) : 0, t >= C1 ? 1 - seg(t, C1, C1 + 0.6) : 0, seg(t, 44.4, 45)),
     sound: t => (t < C1 ? 'out' : 'in'),
@@ -3873,7 +3875,7 @@ const MOVIES = {
     },
     render(t) {
       const ext = t < C1; cine.ext.visible = ext; cine.cab.visible = !ext;
-      if (ext) this.cut1(t); else if (t < C2) this.cut2(t - C1); else if (t < C3) this.cut3(t - C2); else if (t < C4) this.cut4(t - C3); else this.cut6(t - C4);
+      if (ext) this.cut1(t); else if (t < C2) this.cut2(t - C1); else if (t < C3) this.cut3(t - C2); else if (t < C4) this.cut4(t - C3); else this.cut5(t - C4);
     },
     // カット1（7秒）：雲の中から、揺れるヘリの正面が近づいてくる。最後の1秒でカメラの上を越えて後ろへ飛び去り、カメラはそれを追う
     cut1(t) {
@@ -3901,10 +3903,10 @@ const MOVIES = {
     // カット4（6秒）：コックピットから操縦士2人と主人公の方を向く。計器を操作して確認する操縦士たち →「ただ、今回の任務は…」
     cut4(t) { this.cabin(t + C3); const C = cine.cab.position, v = cabinShake(t + C3);
       cineCam.position.set(C.x + COCKPIT_CAM.x + v.x, COCKPIT_CAM.y + v.y, COCKPIT_CAM.z); cineCam.lookAt(C.x + COCKPIT_LOOK.x, COCKPIT_LOOK.y, COCKPIT_LOOK.z); cineCam.rotateZ(v.roll); cine.fov = 74; },
-    // カット6（14秒）：同じ位置から、カーヴァーが左手に持つ地図へズーム。赤丸の村をじっと見る。操縦士と副操縦士の話が続く
-    cut6(t) { this.cabin(t + C4); const C = cine.cab.position, v = cabinShake(t + C4), k = easeIO(seg(t, 0, 3.2)), m = cine.mapPos;
+    // カット5（14秒）：同じ位置から、カーヴァーが左手に持つ地図へズーム。赤丸の村をじっと見る。副操縦士「もちろん…」のあと、操縦士の話が続く
+    cut5(t) { this.cabin(t + C4); const C = cine.cab.position, v = cabinShake(t + C4), k = easeIO(seg(t, 0, 3.2)), m = cine.mapPos;
       const from = _a.set(C.x + COCKPIT_CAM.x, COCKPIT_CAM.y, COCKPIT_CAM.z), look0 = _b.set(C.x + COCKPIT_LOOK.x, COCKPIT_LOOK.y, COCKPIT_LOOK.z);
-      const to = _c.copy(cine.mapN).multiplyScalar(0.36).add(m), s = 1 - k * 0.6; // end: 36 cm in front of the map
+      const to = _c.copy(cine.mapN).multiplyScalar(0.4).add(m), s = 1 - k * 0.6; // end: 40 cm in front of the map (his fingertips stay in frame)
       cineCam.position.copy(from).lerp(to, k).add(_lk.set(v.x * s, v.y * s, 0)); cineCam.lookAt(look0.lerp(m, k)); cineCam.rotateZ(v.roll * s); cine.fov = lerp(74, 46, k); },
     // the cabin at movie time T (shared by cuts 2-6)
     cabin(T) {
@@ -3921,7 +3923,7 @@ const MOVIES = {
       const mh = easeIO(seg(A, 24.9, 25.7));
       if (mh > 0) Object.assign(hp, { lsx: lerp(hp.lsx, -1.0, mh), lex: lerp(hp.lex, -1.5, mh), lsz: lerp(0.15, 0.4, mh), hx: lerp(hp.hx, 0.42, mh), hy: lerp(hp.hy, 0.32, mh), ty: lerp(hp.ty, 0.12, mh) });
       setPose(cine.hero, hp);
-      const H = cine.hero; H.root.updateMatrixWorld(true); cine.map.visible = mh > 0.5;
+      const H = cine.hero; H.root.updateMatrixWorld(true); cine.map.visible = mh > 0.5; cine.doc.visible = !cine.map.visible;
       if (cine.map.visible) {
         // the map sits in his hand, turned between his eyes and the cockpit so both he and the camera can read it
         const hand = H.armL.hand.getWorldPosition(_p), eye = H.head.getWorldPosition(_q), cab = cine.cab.position;
@@ -3936,16 +3938,16 @@ const MOVIES = {
         hy: lerp(0, -0.25, seg(T, 7.0, 7.4)) - 0.55 * Math.sin(Math.PI * seg(T, 16.0, 22.4)) + 1.6 * Math.sin(Math.PI * seg(T, 19.4, 21.6)), ty: 0.35 * Math.sin(Math.PI * seg(T, 19.4, 21.6)) });
       // cut 4: one hand up on the overhead panel, checking switches; later his reassuring last line
       const opsC = Math.sin(Math.PI * seg(A, 25.0, 27.6));
-      cp.lsx = lerp(cp.lsx, -2.6, opsC) + Math.sin(A * 11) * 0.05 * opsC; cp.lex = lerp(cp.lex, -0.25, opsC); cp.hx += -0.35 * opsC + talk(A, 41.8, 44.6);
-      const glance = Math.sin(Math.PI * seg(A, 41.6, 44.8)); cp.hy += 1.2 * glance; cp.ty = (cp.ty || 0) + 0.3 * glance;
+      cp.lsx = lerp(cp.lsx, -2.6, opsC) + Math.sin(A * 11) * 0.05 * opsC; cp.lex = lerp(cp.lex, -0.25, opsC); cp.hx += -0.35 * opsC + talk(A, 31.3, 34.1);
+      const glance = Math.sin(Math.PI * seg(A, 31.1, 34.4)); cp.hy += 1.2 * glance; cp.ty = (cp.ty || 0) + 0.3 * glance;
       setPose(cine.copilot, cp);
       // pilot: hands on the controls, nods at the co-pilot, then glances back at the hero while he speaks
       const nod = Math.sin(Math.PI * seg(T, 10.9, 11.4)) * 0.3, back = Math.sin(Math.PI * seg(T, 13.6, 16.2)), pp = SEAT();
       Object.assign(pp, { rsx: -0.6, rex: -0.8, lsx: -0.5, lex: -0.95, hx: 0.05 + nod + talk(T, 12.0, 16.0), hy: back * 1.15, ty: back * 0.35 });
       // cut 4: checks the gauges on the lower panel, then tells the story half turned toward Carver
-      const opsP = Math.sin(Math.PI * seg(A, 25.0, 27.6)), tell = Math.sin(Math.PI * seg(A, 27.3, 41.8));
+      const opsP = Math.sin(Math.PI * seg(A, 25.0, 27.6)), tell = Math.sin(Math.PI * seg(A, 27.3, 44.8));
       pp.rsx = lerp(pp.rsx, -1.2, opsP) + Math.sin(A * 9) * 0.05 * opsP; pp.rex = lerp(pp.rex, -0.2, opsP);
-      pp.hx += 0.28 * opsP + talk(A, 27.5, 31.0) + talk(A, 31.6, 41.6); pp.hy += 0.45 * tell; pp.ty += 0.15 * tell;
+      pp.hx += 0.28 * opsP + talk(A, 27.5, 31.0) + talk(A, 34.4, 44.6); pp.hy += 0.45 * tell; pp.ty += 0.15 * tell;
       setPose(cine.pilot, pp);
     },
   },
