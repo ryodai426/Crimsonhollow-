@@ -3798,7 +3798,7 @@ function buildCine() {
   for (const z of [0.6, 1.5, 2.4]) part(cab, 0.48, 0.02, 0.04, mat(0x1a1a1a), -0.95, 0.455, z);
   part(cab, 0.5, 0.35, 0.4, mat(0x3a3a2a), 0.75, 0.18, 1.7); part(cab, 0.06, 0.6, 0.06, mat(0x222222), 0, 0.3, -0.35); // gear bag, cyclic
   for (let i = 0; i < 4; i++) part(cab, 0.02, 0.02, 2.4, mat(0x6a6a5a), 1.13, 0.6 + i * 0.25, 1.9); // cargo net
-  { const l = new THREE.PointLight(0xdfe8f0, 2.2, 6, 1.5); l.position.set(0.3, 1.25, 2.2); cab.add(l); const p = new THREE.PointLight(0x70ff90, 1.2, 2.5, 1.5); p.position.set(0, 1.0, -1.4); cab.add(p); }
+  { const l = new THREE.PointLight(0xdfe8f0, 1.6, 6, 1.5); l.position.set(0.3, 1.0, 2.2); cab.add(l); const p = new THREE.PointLight(0x70ff90, 1.2, 2.5, 1.5); p.position.set(0, 1.0, -1.4); cab.add(p); }
   // cast: the hero (same look as in play) and two pilots
   const hero = makeHumanoid({ shirt: mat(0x5a3a22, { rough: 0.6 }), sleeve: mat(0x5a3a22, { rough: 0.6 }), vest: mat(0x2a2620), pants: mat(0x2a3240), skin: mat(0xc9a07e), hair: mat(0x3a2818), hairBack: true, glove: mat(0x1a1612), boots: mat(0x1e1712) });
   const doc = grp(hero.armR.hand, 0, -0.06, 0.06); doc.rotation.x = -1.1;
@@ -3807,6 +3807,21 @@ function buildCine() {
   addHelmet(copilot); addHelmet(pilot);
   for (const [h, x, z, ry] of [[hero, -0.92, 1.35, Math.PI / 2], [copilot, -0.5, -0.83, Math.PI], [pilot, 0.5, -0.83, Math.PI]]) { h.root.position.set(x, 0, z); h.root.rotation.y = ry; cab.add(h.root); charify(h.root); }
   Object.assign(cine, { hero, copilot, pilot });
+  // the map Carver holds in his left hand: mountains, a river, roads, and the target village circled in red
+  const mapTex = canvasTex(256, (g, s) => {
+    g.fillStyle = '#d8ccaa'; g.fillRect(0, 0, s, s);
+    g.fillStyle = 'rgba(70,110,50,.45)'; for (let i = 0; i < 16; i++) { g.beginPath(); g.arc(rand(0, s), rand(0, s), rand(14, 34), 0, 7); g.fill(); }
+    g.strokeStyle = 'rgba(120,80,40,.5)'; g.lineWidth = 1; for (let i = 0; i < 7; i++) { g.beginPath(); g.ellipse(70, 70, 18 + i * 9, 12 + i * 7, 0.4, 0, 7); g.stroke(); g.beginPath(); g.ellipse(200, 190, 12 + i * 8, 10 + i * 6, -0.3, 0, 7); g.stroke(); }
+    g.strokeStyle = '#4a7ab0'; g.lineWidth = 4; g.beginPath(); g.moveTo(0, 150); g.bezierCurveTo(70, 120, 110, 210, 256, 170); g.stroke();
+    g.strokeStyle = '#7a3a20'; g.lineWidth = 3; g.beginPath(); g.moveTo(20, 256); g.lineTo(90, 175); g.lineTo(150, 120); g.lineTo(256, 60); g.stroke();
+    g.setLineDash([5, 4]); g.strokeStyle = '#3a3a30'; g.lineWidth = 2; g.beginPath(); g.moveTo(150, 120); g.lineTo(168, 92); g.stroke(); g.setLineDash([]);
+    g.fillStyle = '#2a2a24'; for (let i = 0; i < 9; i++) g.fillRect(162 + (i % 3) * 7 + rand(-2, 2), 70 + Math.floor(i / 3) * 7 + rand(-2, 2), 5, 5); // the village
+    g.strokeStyle = '#c41010'; g.lineWidth = 5; g.beginPath(); g.ellipse(170, 78, 30, 24, -0.2, 0.3, 6.6); g.stroke();       // red circle
+    g.lineWidth = 3; g.beginPath(); g.moveTo(205, 40); g.lineTo(192, 56); g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 2; for (const x of [85, 171]) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, s); g.stroke(); } g.beginPath(); g.moveTo(0, 128); g.lineTo(s, 128); g.stroke(); // folds
+  });
+  cine.map = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.3), new THREE.MeshStandardMaterial({ map: mapTex, roughness: 0.9, side: THREE.DoubleSide }));
+  cine.map.visible = false; cab.add(cine.map);
 }
 function drawRadar(t) {
   const { g, c, tex } = cine.radar, s = c.width, a = t * 2.4;
@@ -3831,17 +3846,23 @@ function cabinShake(T) {
     roll: n(0.0018, 13.3, 0.7) + bump * 0.005 * Math.sin(T * 17),
   };
 }
-const C1 = 7, C2 = 14; // cut 2 starts at 7 s, cut 3 at 14 s
+const C1 = 7, C2 = 14, C3 = 25, C4 = 31; // cut 2 starts at 7 s, cut 3 at 14 s, cut 4 at 25 s, cut 6 at 31 s
+const COCKPIT_CAM = new V3(0.05, 1.5, -2.02), COCKPIT_LOOK = new V3(-0.25, 1.05, 1.4); // cut 4 (inside the cockpit, looking back)
 const MOVIES = {
   stage1: {
-    dur: 25,
+    dur: 45,
     subs: [
       [9.6, 13.4, '副操縦士', '自動運転、解除します。ここからは手動で目的地まで向かいます。'],
       [14.5, 18.5, '操縦士', 'にしても、今回の任務は不気味ですよね。カーヴァーさんも、あんまり気乗りしないでしょう。'],
       [18.8, 20.9, '副操縦士', 'いわゆる貧乏くじってやつですね。'],
       [21.1, 24.7, '副操縦士', 'カーヴァーさんも出世街道を渡っているから、上からの指令は無下にはできませんよね。'],
+      [27.5, 31.0, '操縦士', 'ただ、今回の任務は前任者が失踪したとかで、奇妙さでいったら折り紙付きです。'],
+      [31.6, 34.8, '操縦士', 'そこの村、たった一晩で住民全員が消えてしまったそうです。'],
+      [35.0, 38.6, '操縦士', '第一発見者が言うには、消える直前、彼らの目が赤いとか、燃えてるとかなんとか…'],
+      [38.8, 41.6, '操縦士', '錯乱状態にあったので、どこまで信じていいのか分かりませんが。'],
+      [41.8, 44.6, '副操縦士', 'もちろんカーヴァーさんは戻ってくると信じてますから。'],
     ],
-    fade: t => Math.max(1 - seg(t, 0, 0.6), t < C1 ? seg(t, 6.75, C1) : 0, t >= C1 ? 1 - seg(t, C1, C1 + 0.6) : 0, seg(t, 24.4, 25)),
+    fade: t => Math.max(1 - seg(t, 0, 0.6), t < C1 ? seg(t, 6.75, C1) : 0, t >= C1 ? 1 - seg(t, C1, C1 + 0.6) : 0, seg(t, 44.4, 45)),
     sound: t => (t < C1 ? 'out' : 'in'),
     // outside, the rotor gets louder and brighter as the helicopter comes close, and pans as it passes overhead
     level(t) {
@@ -3852,7 +3873,7 @@ const MOVIES = {
     },
     render(t) {
       const ext = t < C1; cine.ext.visible = ext; cine.cab.visible = !ext;
-      if (ext) this.cut1(t); else if (t < C2) this.cut2(t - C1); else this.cut3(t - C2);
+      if (ext) this.cut1(t); else if (t < C2) this.cut2(t - C1); else if (t < C3) this.cut3(t - C2); else if (t < C4) this.cut4(t - C3); else this.cut6(t - C4);
     },
     // カット1（7秒）：雲の中から、揺れるヘリの正面が近づいてくる。最後の1秒でカメラの上を越えて後ろへ飛び去り、カメラはそれを追う
     cut1(t) {
@@ -3877,8 +3898,17 @@ const MOVIES = {
     // カット3（11秒）：キャビンからコックピットへズーム。操縦士と副操縦士の会話
     cut3(t) { this.cabin(t + C2); const C = cine.cab.position, k = easeIO(seg(t, 0, 4)), v = cabinShake(t + C2);
       cineCam.position.set(C.x + lerp(0.2, 0.0, k) + v.x, lerp(1.6, 1.62, k) + v.y, lerp(2.6, 0.65, k)); cineCam.lookAt(C.x, lerp(1.0, 1.08, k), -1.7); cineCam.rotateZ(v.roll); cine.fov = lerp(60, 52, k); },
-    // the cabin at movie time T (shared by cuts 2 and 3)
+    // カット4（6秒）：コックピットから操縦士2人と主人公の方を向く。計器を操作して確認する操縦士たち →「ただ、今回の任務は…」
+    cut4(t) { this.cabin(t + C3); const C = cine.cab.position, v = cabinShake(t + C3);
+      cineCam.position.set(C.x + COCKPIT_CAM.x + v.x, COCKPIT_CAM.y + v.y, COCKPIT_CAM.z); cineCam.lookAt(C.x + COCKPIT_LOOK.x, COCKPIT_LOOK.y, COCKPIT_LOOK.z); cineCam.rotateZ(v.roll); cine.fov = 74; },
+    // カット6（14秒）：同じ位置から、カーヴァーが左手に持つ地図へズーム。赤丸の村をじっと見る。操縦士と副操縦士の話が続く
+    cut6(t) { this.cabin(t + C4); const C = cine.cab.position, v = cabinShake(t + C4), k = easeIO(seg(t, 0, 3.2)), m = cine.mapPos;
+      const from = _a.set(C.x + COCKPIT_CAM.x, COCKPIT_CAM.y, COCKPIT_CAM.z), look0 = _b.set(C.x + COCKPIT_LOOK.x, COCKPIT_LOOK.y, COCKPIT_LOOK.z);
+      const to = _c.copy(cine.mapN).multiplyScalar(0.36).add(m), s = 1 - k * 0.6; // end: 36 cm in front of the map
+      cineCam.position.copy(from).lerp(to, k).add(_lk.set(v.x * s, v.y * s, 0)); cineCam.lookAt(look0.lerp(m, k)); cineCam.rotateZ(v.roll * s); cine.fov = lerp(74, 46, k); },
+    // the cabin at movie time T (shared by cuts 2-6)
     cabin(T) {
+      const A = T; // absolute movie time (the later cuts are timed with it)
       cineScene.fog.color.setHex(0x2a2e32); cineScene.fog.density = 0.01; cineScene.background.setHex(0x2a2e32);
       cine.skyTex.offset.set(T * 0.25, Math.sin(T * 0.6) * 0.02); drawRadar(T);
       cine.buttons.forEach((b, i) => { b.visible = ((T * (0.7 + (i % 5) * 0.31) + i * 0.37) % 1) < 0.7; });
@@ -3887,15 +3917,35 @@ const MOVIES = {
       const r = easeIO(seg(T, 8.2, 9.4)), toPilots = easeIO(seg(T, 12.8, 13.6)) * (1 - easeIO(seg(T, 21.6, 22.4))), hp = SEAT();
       Object.assign(hp, { rsx: lerp(-1.05, -0.5, r), rex: lerp(-1.35, -0.45, r), lsx: lerp(-0.55, -0.4, r), lex: lerp(-0.95, -0.35, r), lsz: 0.15,
         tx: lerp(0.14, 0.06, r), hx: lerp(0.5, 0.22, r) - toPilots * 0.15, hy: -0.2 * easeIO(seg(T, 9.0, 10.4)) * (1 - toPilots) + toPilots * 0.75, ty: toPilots * 0.2 });
+      // from cut 4 on he holds the map up in his left hand and studies it
+      const mh = easeIO(seg(A, 24.9, 25.7));
+      if (mh > 0) Object.assign(hp, { lsx: lerp(hp.lsx, -1.0, mh), lex: lerp(hp.lex, -1.5, mh), lsz: lerp(0.15, 0.4, mh), hx: lerp(hp.hx, 0.42, mh), hy: lerp(hp.hy, 0.32, mh), ty: lerp(hp.ty, 0.12, mh) });
       setPose(cine.hero, hp);
+      const H = cine.hero; H.root.updateMatrixWorld(true); cine.map.visible = mh > 0.5;
+      if (cine.map.visible) {
+        // the map sits in his hand, turned between his eyes and the cockpit so both he and the camera can read it
+        const hand = H.armL.hand.getWorldPosition(_p), eye = H.head.getWorldPosition(_q), cab = cine.cab.position;
+        const aim = _w.set(cab.x + COCKPIT_CAM.x, COCKPIT_CAM.y, COCKPIT_CAM.z).lerp(eye, 0.55);
+        cine.map.position.copy(hand).add(_v.subVectors(aim, hand).normalize().multiplyScalar(0.06)).add(_v.set(0, 0.07, 0));
+        cine.map.parent.worldToLocal(cine.map.position); cine.map.lookAt(aim); cine.map.updateMatrixWorld(true);
+        cine.mapPos = cine.map.getWorldPosition(cine.mapPos || new V3()); cine.mapN = _v.subVectors(aim, cine.mapPos).normalize().clone();
+      }
       // co-pilot: checks the buttons and the radar, then speaks
       const reach = Math.sin(Math.PI * seg(T, 5.2, 7.0)), cp = SEAT();
       Object.assign(cp, { rsx: lerp(-0.6, -1.4, reach) + Math.sin(T * 10) * 0.04 * reach, rex: lerp(-0.8, -0.15, reach), lsx: -0.55, lex: -0.9, hx: lerp(0.1, 0.35, reach) + talk(T, 7.1, 10.9) + talk(T, 16.3, 22.2),
         hy: lerp(0, -0.25, seg(T, 7.0, 7.4)) - 0.55 * Math.sin(Math.PI * seg(T, 16.0, 22.4)) + 1.6 * Math.sin(Math.PI * seg(T, 19.4, 21.6)), ty: 0.35 * Math.sin(Math.PI * seg(T, 19.4, 21.6)) });
+      // cut 4: one hand up on the overhead panel, checking switches; later his reassuring last line
+      const opsC = Math.sin(Math.PI * seg(A, 25.0, 27.6));
+      cp.lsx = lerp(cp.lsx, -2.6, opsC) + Math.sin(A * 11) * 0.05 * opsC; cp.lex = lerp(cp.lex, -0.25, opsC); cp.hx += -0.35 * opsC + talk(A, 41.8, 44.6);
+      const glance = Math.sin(Math.PI * seg(A, 41.6, 44.8)); cp.hy += 1.2 * glance; cp.ty = (cp.ty || 0) + 0.3 * glance;
       setPose(cine.copilot, cp);
       // pilot: hands on the controls, nods at the co-pilot, then glances back at the hero while he speaks
       const nod = Math.sin(Math.PI * seg(T, 10.9, 11.4)) * 0.3, back = Math.sin(Math.PI * seg(T, 13.6, 16.2)), pp = SEAT();
       Object.assign(pp, { rsx: -0.6, rex: -0.8, lsx: -0.5, lex: -0.95, hx: 0.05 + nod + talk(T, 12.0, 16.0), hy: back * 1.15, ty: back * 0.35 });
+      // cut 4: checks the gauges on the lower panel, then tells the story half turned toward Carver
+      const opsP = Math.sin(Math.PI * seg(A, 25.0, 27.6)), tell = Math.sin(Math.PI * seg(A, 27.3, 41.8));
+      pp.rsx = lerp(pp.rsx, -1.2, opsP) + Math.sin(A * 9) * 0.05 * opsP; pp.rex = lerp(pp.rex, -0.2, opsP);
+      pp.hx += 0.28 * opsP + talk(A, 27.5, 31.0) + talk(A, 31.6, 41.6); pp.hy += 0.45 * tell; pp.ty += 0.15 * tell;
       setPose(cine.pilot, pp);
     },
   },
