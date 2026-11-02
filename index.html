@@ -213,6 +213,11 @@ body.touch #status{top:calc(8px + env(safe-area-inset-top,0px));right:calc(10px 
 body.touch #topRight{position:static;text-align:left;margin-top:calc(var(--k)*6px)}
 body.touch #log{bottom:auto;top:40%;left:12px}
 body.touch #prompt{top:46%}
+#tut{position:absolute;left:50%;top:22%;transform:translateX(-50%);max-width:86%;text-align:center;font-size:calc(var(--k)*18px);line-height:1.5;
+  background:rgba(10,8,6,.72);border:1px solid var(--gold);padding:calc(var(--k)*6px) calc(var(--k)*14px);border-radius:3px}
+#tut span{display:block;font-size:.7em;letter-spacing:.3em;color:var(--gold)}
+#tut b{color:var(--gold);font-weight:400}
+body.touch #tut{top:30%;font-size:14px}
 body.touch #bossBar{top:auto;bottom:44%;width:70%}
 body.touch.portrait #tCase{top:auto!important;left:28px!important;bottom:calc(176px + env(safe-area-inset-bottom,0px))}
 body.touch.landscape #status{flex-direction:row;align-items:flex-start;gap:10px}
@@ -260,6 +265,7 @@ body.touch.landscape #tNext{width:auto!important;height:auto!important}
   <div id="bossBar" class="hidden"><div id="bossName">処刑人 ― THE EXECUTIONER</div><div id="bossHp"><i></i></div></div>
   <div id="banner"><div id="bannerA"></div><div id="bannerB"></div></div>
   <div id="prompt" class="hidden"></div>
+  <div id="tut" class="hidden"></div>
   <div id="qte" class="hidden"><div id="qteKey">SPACE</div><div id="qteText"></div><div id="qteBar"><i></i></div></div>
   <div id="log"></div>
   <canvas id="radar" width="96" height="96"></canvas>

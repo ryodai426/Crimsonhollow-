@@ -30,6 +30,13 @@ const { chromium } = require('playwright');
   console.log(await p.evaluate(() => { const g = window.__game; g.cine.paused = false; g.cine.t = g.cine.movie.dur; g.sim(0.1);
     return `ambush over: state ${g.game.state} enemies ${g.enemies.filter(e => e.alive).length} inside ${g.enemies.filter(e => e.alive && g.houseAt(e.pos.x, e.pos.z)).length}`; }));
   await shot('4-fight');
+  // the tutorial fight: slow and weak villagers, no game over, tips on screen
+  console.log(await p.evaluate(async () => { const g = window.__game, P = g.player, Z = g.enemies.filter(e => e.alive);
+    const info = Z.map(e => `${e.type} weak=${!!e.weak} speed ${e.speed.toFixed(2)} (normal ${e.t.speed})`).join(', ');
+    const tips = new Set(); let minHp = 999; P.invuln = 0;
+    for (let i = 0; i < 300; i++) { g.sim(0.1); minHp = Math.min(minHp, P.hp); const t = document.getElementById('tut'); if (!t.classList.contains('hidden')) tips.add(t.textContent.slice(8, 30)); }
+    return `${info}\n  after 30 s standing still: hp ${P.hp.toFixed(0)} (lowest ${minHp.toFixed(0)}), dead ${P.dead}, state ${g.game.state}\n  tips: ${[...tips].join(' / ')}`; }));
+  await shot('4b-tip');
   console.log(await p.evaluate(() => { const g = window.__game, P = g.player; let n = 0;
     for (let i = 0; i < 400 && g.search.step === 'ambush'; i++) { P.invuln = 99; P.hp = 100; for (const e of g.enemies) if (e.alive && e.pos.distanceTo(P.pos) < 7) { e.damage(999, 'body', new (P.pos.constructor)(0, 0, 1)); n++; } g.sim(0.25); }
     return `killed ${n}, step ${g.search.step}, obj="${document.getElementById('obj').textContent}", marker ${g.director && true}`; }));

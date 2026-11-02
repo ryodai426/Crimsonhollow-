@@ -3085,6 +3085,7 @@ function startWave(i, fromContinue) {
   setH('obj', w.obj);
   director.proT = 0; director.goShown = false; director.ambushShown = false; director.dim = !!w.dim; marker.visible = false; setFade(false);
   if (!fromContinue) snapshot = { inv: JSON.parse(JSON.stringify(inv)), hp: player.hp, maxHp: player.maxHp };
+  showTip(null); if (search.tips) search.tips = null;
   trader.hide(); setAtmos(w.atmos); showBanner(w.title, w.sub); setMusic(w.boss || w.search ? 'none' : 'combat');
   if (w.search && fromContinue && (search.step === 'ambush' || search.step === 'exit')) { // died in the ambush: back in that house, the villagers come again
     const H = search.house; player.pos.set(H.x, 0, H.z); search.step = 'ambush'; search.left = AMBUSH.total; search.spawnT = 2;
@@ -3157,8 +3158,31 @@ function updateDirector(dt) {
 function setFade(on) { $('fade').classList.toggle('on', on); }
 // ---- STAGE 1-1: search the houses. After enough letters, villagers break into the house (movie), then outside (movie), then 1-2 ----
 const search = { found: new Set(), need: 3, step: 'explore', house: null, left: 0, spawnT: 0 };
-const AMBUSH = { total: 5, inMovie: 2 }; // villagers in the house ambush: 2 walk in during the movie, the rest follow through the door
-function resetSearch() { search.found.clear(); search.step = 'explore'; search.house = null; search.left = 0; search.spawnT = 0; }
+const AMBUSH = { total: 2, inMovie: 2 }; // the house ambush is the combat tutorial: only the two villagers that walk in during the movie
+// the tutorial fight: slow, weak villagers (half speed, half damage), health never drops below minHp, and tips one after another
+const TUTORIAL = { speed: 0.5, minHp: 20 };
+const tutorialFight = () => STAGE.waves[director.wave]?.search && search.step === 'ambush';
+const TIPS = {
+  aim: { pc: '<b>右クリック（長押し）</b>で構えて、<b>左クリック</b>で撃て', touch: '<b>構え</b>で構えて、<b>撃つ</b>で撃て' },
+  parts: { pc: '<b>頭</b>を撃つと大ダメージ。<b>脚</b>を撃つとひざをつく', touch: '<b>頭</b>を撃つと大ダメージ。<b>脚</b>を撃つとひざをつく' },
+  guard: { pc: '敵が振りかぶったら <b>F</b> でガード。直前に押すとジャストガード', touch: '敵が振りかぶったら <b>ガード</b>。直前に押すとジャストガード' },
+  knife: { pc: '近づかれたら、構えずに<b>左クリック</b>でナイフ', touch: '近づかれたら、<b>ナイフ</b>で切りつけられる' },
+  heal: { pc: '<b>H</b> でハーブを使って回復できる', touch: '<b>回復</b>でハーブを使って回復できる' },
+  reload: { pc: '弾が切れたら <b>R</b> でリロード', touch: '弾が切れたら <b>R</b> でリロード' },
+};
+function showTip(id) { const t = id && TIPS[id]; setH('tut', t ? `<span>TUTORIAL</span>${t[isTouch ? 'touch' : 'pc']}` : ''); $('tut').classList.toggle('hidden', !t); }
+function updateTips(dt) {
+  const T = search.tips || (search.tips = { cur: null, t: 0, done: new Set() }); T.t += dt;
+  const Z = enemies.filter(e => e.weak), alive = Z.filter(e => e.alive), hit = Z.some(e => e.hp < e.maxHp || !e.alive);
+  const want = (id, cond) => cond && !T.done.has(id) ? id : null;
+  const next = want('heal', player.hp < player.maxHp * 0.5 && inv.herbG + inv.herbGR + inv.herbR > 0) || want('reload', inv.mag[player.weapon] === 0)
+    || want('guard', alive.some(e => (e.state === 'windup' || e.state === 'grabWind') && e.pos.distanceTo(player.pos) < 3.5))
+    || want('aim', !hit) || want('parts', hit) || want('knife', hit && alive.some(e => e.pos.distanceTo(player.pos) < 2.2));
+  if (T.cur && T.t < 4.5 && !(T.cur === 'aim' && hit)) return; // keep a tip up for a while
+  if (T.cur) T.done.add(T.cur);
+  if (next !== T.cur || !next) { T.cur = next; T.t = 0; showTip(next); }
+}
+function resetSearch() { search.found.clear(); search.step = 'explore'; search.house = null; search.left = 0; search.spawnT = 0; search.tips = null; showTip(null); }
 function spawnAt(type, x, z) {
   const e = new Enemy(type, x, z, STAGE.waves[director.wave]); e.home = new V3(x, 0, z); e.zone = zoneOf(x, z); e.always = true; enemies.push(e); return e;
 }
@@ -3174,12 +3198,14 @@ function updateSearch(w, dt, alive) {
   } else if (search.step === 'ambush') {
     const Hs = search.house;
     if (search.left > 0 && alive < 3) { search.spawnT -= dt; if (search.spawnT <= 0) {
-      const side = rand(-1.5, 1.5), d = rand(4, 6); spawnAt(pick(['fork', 'sickle', 'fork', 'axe']), Hs.door.x + Hs.out.x * d - Hs.out.z * side, Hs.door.z + Hs.out.z * d + Hs.out.x * side);
+      const side = rand(-1.5, 1.5), d = rand(4, 6), e = spawnAt(pick(['fork', 'sickle']), Hs.door.x + Hs.out.x * d - Hs.out.z * side, Hs.door.z + Hs.out.z * d + Hs.out.x * side);
+      e.weak = true; e.speed *= TUTORIAL.speed; // (only after a continue: the tutorial villagers come again)
       search.left--; search.spawnT = rand(1.5, 3); } }
+    updateTips(dt);
     const now = enemies.filter(e => e.alive && !e.boss).length; // counted again: one may have just come in this frame
     setH('obj', `家に入ってきた村人を撃退しろ　残り ${search.left + now}`);
     if (search.left === 0 && now === 0) {
-      search.step = 'exit'; marker.position.copy(Hs.door).addScaledVector(Hs.out, 1.4); marker.visible = true; showBanner('', '家の外に出ろ'); setMusic('none');
+      search.step = 'exit'; marker.position.copy(Hs.door).addScaledVector(Hs.out, 1.4); marker.visible = true; showBanner('', '家の外に出ろ'); setMusic('none'); showTip(null);
     }
   } else if (search.step === 'exit') {
     setH('obj', '家の外に出ろ');
@@ -3188,12 +3214,13 @@ function updateSearch(w, dt, alive) {
 }
 // ---- things to examine (E / the touch button) ----
 function nearestLook() {
-  if (!LOOKS.length || player.dead || player.grabbedBy) return null; const H = houseAt(player.pos.x, player.pos.z); if (!H) return null;
+  if (!LOOKS.length || player.dead || player.grabbedBy || tutorialFight()) return null; const H = houseAt(player.pos.x, player.pos.z); if (!H) return null;
   let best = null, bd = 1.8; for (const L of LOOKS) { if (L.house !== H.idx) continue; const d = Math.hypot(L.pos.x - player.pos.x, L.pos.z - player.pos.z); if (d < bd) { bd = d; best = L; } }
   return best;
 }
 function openLook(L) {
   game.state = 'read'; input.aim = input.fire = false; for (const k in keys) keys[k] = false;
+  document.exitPointerLock?.(); // show the mouse cursor so the close button can be clicked
   let text = L.text;
   if (L.item) {
     if (L.taken) text = 'もう何も残っていない。';
@@ -3237,6 +3264,7 @@ function guardFacing(from) {
 // returns false (no effect), 'guard' (blocked, reduced) or true (clean hit)
 function hurtPlayer(dmg, from, force, attacker) {
   if (player.dead || (!force && (player.invuln > 0 || player.dodgeT > 0))) return false;
+  if ((attacker || player.grabbedBy)?.weak) dmg *= 0.5; // the tutorial villagers in STAGE 1-1 hit half as hard
   if (!force && guardFacing(from)) {
     const just = player.stateT <= GUARD_JUST;
     dmg *= just ? 0.1 : 0.35; if (inv.vest) dmg *= 0.7;
@@ -3244,6 +3272,7 @@ function hurtPlayer(dmg, from, force, attacker) {
     fxSparks(player.pos.clone().setY(1.4).addScaledVector(_a.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw)), 0.45), just ? 14 : 7);
     showLog(just ? 'ジャストガード！' : 'ガード');
     if (attacker) guardRecoil(attacker, just);
+    if (tutorialFight() && player.hp < TUTORIAL.minHp) player.hp = TUTORIAL.minHp;
     if (player.hp <= 0) { player.hp = 0; killPlayer(); }
     return 'guard';
   }
@@ -3251,6 +3280,7 @@ function hurtPlayer(dmg, from, force, attacker) {
   player.hp -= dmg; player.invuln = force ? 0.1 : 0.55; player.hurtT = 0.3; ui.dmg = 1; shake(0.25, 0.35); sfx.hurt();
   fxBlood(player.pos.clone().setY(1.3), player.pos.clone().sub(from || player.pos).setY(0).normalize(), 12);
   if (player.reloadT > 0 && dmg > 20) { player.reloadT = 0; }
+  if (tutorialFight() && player.hp < TUTORIAL.minHp) player.hp = TUTORIAL.minHp; // the tutorial fight never ends in a game over
   if (player.hp <= 0) { player.hp = 0; killPlayer(); }
   return true;
 }
@@ -3719,7 +3749,7 @@ $('ctrlList').innerHTML = CONTROLS[isTouch ? 'touch' : 'pc'].map(([k, v]) => `<d
 if (isTouch) $('sensLabel').textContent = '視点の感度';
 function goHome() {
   clearActors(); marker.visible = false; setFade(false); setMusic('none'); document.exitPointerLock?.();
-  ['pause', 'hud', 'touch', 'dead', 'win', 'read', 'shop', 'case'].forEach(k => $(k)?.classList.add('hidden'));
+  ['pause', 'hud', 'touch', 'dead', 'win', 'read', 'shop', 'case'].forEach(k => $(k)?.classList.add('hidden')); showTip(null);
   $('title').classList.remove('hidden'); game.state = 'title';
 }
 $('homeBtn').onclick = e => { e.stopPropagation(); goHome(); };
@@ -4388,7 +4418,7 @@ MOVIES.ambush = {
   setup() {
     const H = search.house, P = player.pos.clone(), D = H.door.clone(), C = new V3(H.x, 0, H.z);
     const face0 = ph.root.rotation.y, faceDoor = angTo(P, D);
-    const Z = [0, 1].map(i => { const e = spawnAt(i ? 'sickle' : 'fork', D.x + H.out.x * 3, D.z + H.out.z * 3); e.alerted = true; return e; });
+    const Z = [0, 1].map(i => { const e = spawnAt(i ? 'sickle' : 'fork', D.x + H.out.x * 3, D.z + H.out.z * 3); e.alerted = true; e.weak = true; e.speed *= TUTORIAL.speed; return e; });
     cine.amb = { H, P, D, C, face0, faceDoor, Z };
   },
   render(t) {
