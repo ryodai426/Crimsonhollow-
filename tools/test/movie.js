@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
   const SP = process.argv[2], id = process.argv[3] || 'stage1';
   const p = await b.newPage({ viewport: { width: 800, height: 600 } }); const errs = []; p.on('pageerror', e => errs.push(e.message + ' ' + e.stack));
   await p.goto('http://localhost:8766/?' + Date.now()); await p.waitForTimeout(1500);
-  const times = (process.argv[4] || '1,3,4,5,6,6.3,6.5,6.7,6.9,8,11,12.5,15,18,22.5').split(',').map(Number);
+  const times = (process.argv[4] || '1,3,5,6.5,9,12,16,20,26,29,33,38,43,46,49.2,52.5,54,57,61.5,63,66,72.5,74.2,75.2,76.6,78,81.5').split(',').map(Number);
   await p.evaluate(id => { const g = window.__game; g.playMovie(id, () => window.__ended = true); g.cine.paused = true; }, id);
   for (const t of times) {
     const lv = await p.evaluate(t => { const g = window.__game; g.cine.t = t; g.renderCine(t); const L = g.cine.movie.level && g.cine.movie.level(t); return L ? `vol ${L.vol.toFixed(2)} lp ${L.lp.toFixed(0)} pan ${L.pan.toFixed(2)}` : 'inside'; }, t);

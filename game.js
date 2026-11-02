@@ -3721,18 +3721,29 @@ let last = performance.now();
 const cineScene = new THREE.Scene();
 cineScene.fog = new THREE.FogExp2(0x7a828a, 0.04); cineScene.background = new THREE.Color(0x7a828a);
 const cineCam = new THREE.PerspectiveCamera(50, 4 / 3, 0.05, 300);
-cineScene.add(new THREE.HemisphereLight(0xc8d2dc, 0x3a3a34, 1.1));
-{ const sun = new THREE.DirectionalLight(0xe6eef6, 1.3); sun.position.set(-4, 10, 6); cineScene.add(sun); }
+const cineHemi = new THREE.HemisphereLight(0xc8d2dc, 0x3a3a34, 1.1); cineScene.add(cineHemi);
+const cineSun = new THREE.DirectionalLight(0xe6eef6, 1.3); cineSun.position.set(-4, 10, 6); cineScene.add(cineSun);
+// sky light and sun per set: the clouds and the cabin share one look, the village entrance is at dusk like chapter 1
+function cineLight(dusk) {
+  if (dusk) { cineHemi.color.setHex(0xffb880); cineHemi.groundColor.setHex(0x3a2a1e); cineHemi.intensity = 1.3; cineSun.color.setHex(0xff9050); cineSun.intensity = 2.0; cineSun.position.set(-4.5, 3.2, 6.5); }
+  else { cineHemi.color.setHex(0xc8d2dc); cineHemi.groundColor.setHex(0x3a3a34); cineHemi.intensity = 1.1; cineSun.color.setHex(0xe6eef6); cineSun.intensity = 1.3; cineSun.position.set(-4, 10, 6); }
+}
 const easeIO = t => t * t * (3 - 2 * t);
 const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
 const cine = { movie: null, t: 0, onEnd: null, paused: false, built: false };
 
 // ---- props ----
-function makeHeli() {
+function makeHeli(open = false) {
   const g = new THREE.Group(), body = mat(0x1c2834, { metal: 0.4, rough: 0.5 }), dark = mat(0x0c1014, { metal: 0.5, rough: 0.35 }), stripe = mat(0xb8b0a0, { rough: 0.6 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x0a1218, roughness: 0.1, metalness: 0.8, emissive: 0x1e2e3a, emissiveIntensity: 0.6 });
+  const glass = open ? new THREE.MeshStandardMaterial({ color: 0x1a2a34, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.28, depthWrite: false })
+    : new THREE.MeshStandardMaterial({ color: 0x0a1218, roughness: 0.1, metalness: 0.8, emissive: 0x1e2e3a, emissiveIntensity: 0.6 });
   part(g, 2.0, 1.7, 3.6, body, 0, 1.25, 0);          // cabin (nose toward +z)
-  part(g, 1.9, 1.25, 1.3, body, 0, 1.1, 2.3);        // nose
+  if (!open) part(g, 1.9, 1.25, 1.3, body, 0, 1.1, 2.3); // nose
+  else { // hollow nose: floor, low side panels, glass above them and a roof, so the crew can be seen inside
+    part(g, 1.9, 0.08, 1.3, body, 0, 0.5, 2.3); part(g, 1.9, 0.06, 0.95, body, 0, 1.98, 2.2);
+    for (const sx of [-1, 1]) { part(g, 0.05, 0.55, 1.3, body, sx * 0.95, 0.78, 2.3); part(g, 0.04, 0.9, 1.3, glass, sx * 0.95, 1.5, 2.3); }
+    part(g, 0.03, 1.4, 1.0, mat(0x050608), 1.015, 1.15, -0.6); // the open cabin door on the left side (+x)
+  }
   part(g, 1.5, 0.85, 0.5, body, 0, 0.92, 3.1);
   for (const sx of [-0.48, 0.48]) { const w = part(g, 0.86, 0.8, 0.05, glass, sx, 1.62, 2.86); w.rotation.x = -0.5; }
   part(g, 1.4, 0.42, 0.05, glass, 0, 0.85, 3.36);
@@ -3751,6 +3762,7 @@ function makeHeli() {
   for (const sx of [-0.35, 0.35]) { const l = new THREE.Mesh(new THREE.CircleGeometry(0.12, 10), lampM); l.position.set(sx, 0.55, 3.0); g.add(l); }
   return { g, rotor, tail, beacon };
 }
+const heroLook = () => ({ shirt: mat(0x5a3a22, { rough: 0.6 }), sleeve: mat(0x5a3a22, { rough: 0.6 }), vest: mat(0x2a2620), pants: mat(0x2a3240), skin: mat(0xc9a07e), hair: mat(0x3a2818), hairBack: true, glove: mat(0x1a1612), boots: mat(0x1e1712) });
 function pilotLook(suit) {
   return { shirt: mat(suit), sleeve: mat(suit), pants: mat(suit), vest: mat(0x2a2e26), skin: mat(pick([0xc9a07e, 0xb08a6a])), glove: mat(0x141414), boots: mat(0x1a1612), belt: mat(0x1a1a18) };
 }
@@ -3804,7 +3816,7 @@ function buildCine() {
   for (let i = 0; i < 4; i++) part(cab, 0.02, 0.02, 2.4, mat(0x6a6a5a), 1.13, 0.6 + i * 0.25, 1.9); // cargo net
   { const l = new THREE.PointLight(0xdfe8f0, 1.6, 6, 1.5); l.position.set(0.3, 1.0, 2.2); cab.add(l); const p = new THREE.PointLight(0x70ff90, 1.2, 2.5, 1.5); p.position.set(0, 1.0, -1.4); cab.add(p); }
   // cast: the hero (same look as in play) and two pilots
-  const hero = makeHumanoid({ shirt: mat(0x5a3a22, { rough: 0.6 }), sleeve: mat(0x5a3a22, { rough: 0.6 }), vest: mat(0x2a2620), pants: mat(0x2a3240), skin: mat(0xc9a07e), hair: mat(0x3a2818), hairBack: true, glove: mat(0x1a1612), boots: mat(0x1e1712) });
+  const hero = makeHumanoid(heroLook());
   const docAt = grp(hero.armR.hand, 0, -0.06, 0.06); docAt.rotation.x = -1.1;
   // he holds the board by its near right corner (the edge toward him), so the hand never covers the circled village at the top
   const doc = grp(docAt, -0.09, 0.2, 0);
@@ -3828,6 +3840,127 @@ function buildCine() {
   });
   // the file he reads in his right hand IS the map (cut 5 shows it up close)
   const mapM = new THREE.MeshStandardMaterial({ map: mapTex, roughness: 0.9 }); cine.docPaper.material = mapM;
+  buildCineVillage();
+}
+// ---- the village entrance (cut 7), set far from the clouds and the cabin ----
+// props come from the stage builders; they are made in the game world, then moved here (and their collision boxes dropped)
+function adoptWorld(into, fn) { const n = world.children.length, ns = solids.length; fn(); for (const o of world.children.slice(n)) into.add(o); solids.length = ns; }
+function buildCineVillage() {
+  const vil = new THREE.Group(); vil.position.set(-300, 0, 0); vil.visible = false; cineScene.add(vil); cine.vil = vil;
+  const gnd = new THREE.Mesh(new THREE.PlaneGeometry(300, 300, 38, 38), M.ground); gnd.rotation.x = -Math.PI / 2; vil.add(gnd);
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(8, 24), M.plaza); pad.rotation.x = -Math.PI / 2; pad.position.set(0, 0.015, 3); vil.add(pad);
+  for (let i = 0; i < 6; i++) { const r = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 8), M.plazaRoad); r.rotation.x = -Math.PI / 2; r.position.set(0, 0.03, -6 - i * 8); vil.add(r); }
+  // the village gate: two posts, a crossbeam and a weathered board, fences running off to both sides
+  const wood = M.wood, gate = grp(vil, 0, 0, -9);
+  for (const sx of [-3, 3]) { part(gate, 0.32, 4.4, 0.32, wood, sx, 2.2, 0); part(gate, 0.5, 0.25, 0.5, wood, sx, 4.45, 0); }
+  part(gate, 7.2, 0.3, 0.3, wood, 0, 4.0, 0); part(gate, 2.6, 0.75, 0.08, mat(0x4a3420, { rough: 1 }), 0, 3.35, 0.12);
+  for (const sx of [-1, 1]) { const c = part(gate, 0.03, 0.5, 0.03, mat(0x222018), sx * 1.0, 3.75, 0.12); void c; }
+  { const l = new THREE.PointLight(0xff9a50, 2.2, 9, 1.6); l.position.set(2.6, 3.0, 0.6); gate.add(l); part(gate, 0.18, 0.26, 0.18, new THREE.MeshBasicMaterial({ color: 0xffc070 }), 2.6, 3.0, 0.3); }
+  adoptWorld(vil, () => {
+    fence(3.3, -9, 15, -7); fence(-3.3, -9, -15, -7.5); fence(15, -7, 22, -1); fence(-15, -7.5, -21, -2);
+    makeHouse(-9, -22, 8, 7, 4.2, M.plank); makeHouse(10, -25, 9, 8, 4.5, M.plaster); makeHouse(-3, -38, 8, 8, 4.4, M.stone, true); makeHouse(16, -40, 7, 7, 4, M.plank);
+    makeDeadTree(-6, -12, 1.1); makeDeadTree(7, -14, 1.2);
+    // pines around the landing field (kept clear of the rotor and the road)
+    for (let i = 0; i < 46; i++) { const a = i / 46 * Math.PI * 2 + rand(-0.05, 0.05), r = rand(15, 34), x = Math.cos(a) * r, z = 3 + Math.sin(a) * r; if (Math.abs(x) < 6 && z < -2) continue; makePine(x, z, rand(1.1, 1.8)); }
+  });
+  { const ch = grp(vil, 4, 0, -58); part(ch, 6, 8, 9, M.stone, 0, 4, 0); part(ch, 3, 14, 3, M.stone, 0, 7, 4); const sp = new THREE.Mesh(new THREE.ConeGeometry(2.4, 5, 4), M.roof); sp.position.set(0, 16.5, 4); sp.rotation.y = Math.PI / 4; ch.add(sp); }
+  // the helicopter, landed, with the crew in the cockpit
+  const vh = makeHeli(true), root = grp(vil, 0, 0, 4); root.add(vh.g); cine.vh = { ...vh, root };
+  const pilot = makeHumanoid(pilotLook(0x464c36)), copilot = makeHumanoid(pilotLook(0x4a5038)); addHelmet(pilot); addHelmet(copilot);
+  // facing the nose (+z): the pilot takes the right seat (-x), the co-pilot the left (+x, the side of the door)
+  for (const [h, x] of [[pilot, -0.45], [copilot, 0.45]]) { h.root.position.set(x, 0.5, 1.95); h.root.scale.setScalar(0.92); vh.g.add(h.root); charify(h.root); part(vh.g, 0.5, 0.35, 0.45, mat(0x34352f), x, 0.68, 1.85); part(vh.g, 0.5, 0.75, 0.1, mat(0x34352f), x, 1.1, 1.6); }
+  part(vh.g, 1.7, 0.4, 0.3, mat(0x23272b), 0, 0.95, 2.78); // instrument panel
+  { const l = new THREE.PointLight(0xc0e0c8, 1.4, 3.2, 1.5); l.position.set(0, 1.6, 2.4); vh.g.add(l); }
+  cine.vpilot = pilot; cine.vcopilot = copilot;
+  cine.vhero = makeHumanoid(heroLook()); vil.add(cine.vhero.root); charify(cine.vhero.root);
+  // missiles, fire and smoke (all placed from the movie clock each frame)
+  const mm = mat(0xd8d8d0, { metal: 0.4, rough: 0.4 }); cine.missiles = [];
+  for (let i = 0; i < 2; i++) { const m = grp(vil, 0, 0, 0); const b = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 1.5, 6), mm); b.rotation.x = Math.PI / 2; m.add(b); part(m, 0.5, 0.03, 0.2, mm, 0, 0, -0.55); part(m, 0.03, 0.5, 0.2, mm, 0, 0, -0.55); const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.35, 0), new THREE.MeshBasicMaterial({ color: 0xffd080, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false })); f.position.z = -0.95; m.add(f); m.visible = false; cine.missiles.push(m); }
+  const ico = new THREE.IcosahedronGeometry(1, 1);
+  cine.fire = Array.from({ length: 80 }, () => { const m = new THREE.Mesh(ico, new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })); m.visible = false; vil.add(m); return m; });
+  cine.smoke = Array.from({ length: 170 }, () => { const m = new THREE.Mesh(ico, new THREE.MeshBasicMaterial({ color: 0x24201c, transparent: true, depthWrite: false })); m.visible = false; vil.add(m); return m; });
+  cine.boomL = new THREE.PointLight(0xff8a40, 0, 80, 1.2); vil.add(cine.boomL);
+  cine.glow = new THREE.PointLight(0xff7030, 0, 14, 1.5); vil.add(cine.glow);
+}
+// ---- cut 7: the helicopter's flight, from the movie clock (T = seconds into cut 7) ----
+const FLINCH = { sx: -0.75, ex: -1.4, sz: -0.1 }; // hands up before his body (not over his head)
+const V7 = { liftOff: 14, forward: 19.2, hit: 22.3, hit2: 22.6 };
+V7.hitY = 20 + (V7.hit - V7.forward) * 1.5; V7.crash = V7.hit + (1.5 + Math.sqrt(2.25 + 18 * V7.hitY)) / 9;
+function heli7(T) {
+  const s = { x: 0, y: 0, z: 4, yaw: Math.PI / 2, pitch: 0, roll: 0, down: false };
+  const up = easeIO(seg(T, V7.liftOff, V7.forward + 0.3)); s.y = up * 20 + Math.sin(T * 1.3) * 0.15 * up; s.roll = Math.sin(T * 0.9) * 0.03 * up;
+  s.pitch = -0.05 * Math.sin(Math.PI * seg(T, V7.liftOff, V7.liftOff + 1.6));
+  if (T > V7.forward) { const d = Math.min(T, V7.hit) - V7.forward; s.x = 1.4 * d * d; s.y = 20 + d * 1.5; s.pitch = 0.22 * easeIO(seg(T, V7.forward, V7.forward + 1.3)); }
+  if (T > V7.hit) { // hit in the tail: it starts to spin and falls
+    const d = Math.min(T, V7.crash) - V7.hit, d0 = V7.hit - V7.forward;
+    s.x = 1.4 * d0 * d0 + 6 * d; s.z = 4 + 6 * d; s.y = Math.max(0, V7.hitY + 1.5 * d - 4.5 * d * d);
+    s.yaw += 2.4 * d * d + 0.9 * d; s.roll = 0.45 * d + Math.sin(T * 7) * 0.05; s.pitch = 0.22 + 0.3 * d; s.down = T >= V7.crash;
+  }
+  return s;
+}
+const _h7 = new THREE.Object3D(), _h7i = new THREE.Object3D(); _h7.add(_h7i);
+function heliPoint(T, local, out) { // a point on the helicopter (its own coordinates) at time T, in the village set's coordinates
+  const s = heli7(T); _h7.position.set(s.x, s.y, s.z); _h7.rotation.set(0, s.yaw, 0); _h7i.rotation.set(s.pitch, 0, s.roll); _h7.updateMatrixWorld(true);
+  return _h7i.localToWorld(out.copy(local));
+}
+const TAIL = new V3(0, 1.9, -6.2), ENGINE = new V3(0, 2.4, -0.6);
+const h7 = i => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+// explosion puffs: a bright core that swells and fades, then smoke that keeps rising
+function cineFx(T) {
+  let fi = 0, si = 0; const tmp = _lk;
+  const fire = (p, r, o, hot) => { if (fi >= cine.fire.length || o <= 0.01) return; const m = cine.fire[fi++]; m.visible = true; m.position.copy(p); m.scale.setScalar(r); m.material.opacity = Math.min(1, o); m.material.color.setHex(hot ? 0xffe0a0 : 0xff7a28); };
+  const smoke = (p, r, o) => { if (si >= cine.smoke.length || o <= 0.01) return; const m = cine.smoke[si++]; m.visible = true; m.position.copy(p); m.scale.setScalar(r); m.material.opacity = Math.min(0.85, o); };
+  const burst = (T0, P, n, R, life, seed) => {
+    const a = T - T0; if (a < 0 || a > life + 4) return;
+    for (let i = 0; i < n; i++) {
+      const dx = h7(seed + i) - 0.5, dy = h7(seed + i + 50) - 0.3, dz = h7(seed + i + 90) - 0.5, k = 1 - Math.exp(-a * 5);
+      tmp.set(P.x + dx * R * 1.6 * k, P.y + dy * R * 1.2 * k + a * 0.6, P.z + dz * R * 1.6 * k);
+      if (a < life) fire(tmp, R * (0.3 + 0.5 * k) * (1 - 0.4 * a / life), 1 - a / life, i % 3 === 0 && a < life * 0.4);
+      if (a > 0.15) smoke(tmp.setY(tmp.y + a * 1.2), R * (0.45 + a * 0.35), 0.75 * (1 - (a - 0.15) / (life + 3.8)));
+    }
+  };
+  // missiles and their trails
+  const shots = [[21.65, V7.hit, 0], [21.95, V7.hit2, 1]];
+  shots.forEach(([t0, t1, i]) => {
+    const M = cine.missiles[i], tgt = heliPoint(t1, i ? ENGINE : TAIL, _p), from = _q.copy(tgt).add(_v.set(-14 + i * 5, 8 + i * 6, 72 - i * 4));
+    const u = (T - t0) / (t1 - t0); M.visible = u >= 0 && u < 1;
+    if (M.visible) { M.position.copy(from).lerp(tgt, u); M.lookAt(tgt.x + cine.vil.position.x, tgt.y, tgt.z); }
+    const ut = clamp(u, 0, 1);
+    for (let j = 0; j < 14; j++) { const f = j / 14; if (f > ut) break; const age = T - lerp(t0, t1, f); smoke(_w.copy(from).lerp(tgt, f).add(_v.set(0, age * 0.4, 0)), 0.35 + age * 0.35, 0.6 * (1 - age / 4)); }
+  });
+  burst(V7.hit, heliPoint(V7.hit, TAIL, _w).clone(), 9, 3.2, 1.3, 11);
+  burst(V7.hit2, heliPoint(V7.hit2, ENGINE, _w).clone(), 9, 3.6, 1.4, 37);
+  // burning while it falls: fire on the tail and the engine, a smoke trail behind
+  if (T > V7.hit && T < V7.crash) {
+    for (const [L, n] of [[TAIL, 3], [ENGINE, 3]]) for (let i = 0; i < n; i++) { const p = heliPoint(T, L, _w); p.x += (h7(i + T * 30 | 0) - 0.5) * 1.2; p.y += h7(i + 7 + (T * 30 | 0)) * 0.8; fire(p, 0.8 + h7(i + (T * 20 | 0)) * 0.7, 0.9, i === 0); }
+    for (let j = 1; j < 22; j++) { const tj = T - j * 0.12; if (tj < V7.hit) break; smoke(heliPoint(tj, TAIL, _w).add(_v.set(0, j * 0.08, 0)), 0.8 + j * 0.12, 0.7 * (1 - j / 22)); }
+  }
+  // the crash beyond the trees: a big fireball, then fire on the ground and a column of black smoke
+  const C = heliPoint(V7.crash, ENGINE, _p).setY(0.5).clone(); cine.crashAt = C;
+  burst(V7.crash, _w.copy(C).setY(3), 14, 7.5, 2.2, 71);
+  if (T > V7.crash) {
+    const a = T - V7.crash;
+    for (let i = 0; i < 6; i++) fire(_w.copy(C).add(_v.set((h7(i) - 0.5) * 6, 1 + h7(i + (T * 12 | 0)) * 2.5, (h7(i + 3) - 0.5) * 6)), 1.8 + h7(i + (T * 9 | 0)) * 1.4, 0.8, false);
+    for (let j = 0; j < 46; j++) { const age = a - j * 0.28; if (age <= 0) continue; smoke(_w.copy(C).add(_v.set(Math.sin(j * 2.3) * 1.6 + age * 0.9, 2 + age * 2.6, Math.cos(j * 1.7) * 1.6)), 2.2 + age * 0.75, 0.7 * (1 - age / 14)); }
+  }
+  for (let i = fi; i < cine.fire.length; i++) cine.fire[i].visible = false;
+  for (let i = si; i < cine.smoke.length; i++) cine.smoke[i].visible = false;
+  // light from the blasts
+  const b1 = T - V7.hit, b2 = T - V7.crash; let L = 0;
+  if (b1 > 0) { L = 40 * Math.exp(-b1 * 2.5); cine.boomL.position.copy(heliPoint(Math.min(T, V7.crash), TAIL, _w)); }
+  if (b2 > 0) { L = 60 * Math.exp(-b2 * 1.5) + 14 + Math.sin(T * 23) * 3; cine.boomL.position.copy(C).setY(4); }
+  cine.boomL.intensity = L;
+}
+// sounds fired once when the clock passes them (seeking does not fire them)
+function cineBoom(vol, far) {
+  if (!sfx.ok()) return; const t = AC.ctx.currentTime, o = out(vol, 0.25, 0.6), d = far ? 2.4 : 1.6;
+  const g = AC.ctx.createGain(); env(g, t, 0.004, 1, d); g.connect(o); noise(t, d, g, far ? 900 : 2600, 45);
+  tone(t, 'sine', far ? 60 : 95, 22, d * 0.8, o, 1);
+}
+function cineSonic() {
+  if (!sfx.ok()) return; const t = AC.ctx.currentTime, o = out(0.95, 0.35, 0.5);
+  for (const k of [0, 0.14]) { const g = AC.ctx.createGain(); env(g, t + k, 0.002, 1, 0.45); g.connect(o); noise(t + k, 0.45, g, 2200, 90); tone(t + k, 'sine', 75, 30, 0.5, o, 0.9); }
+  const g2 = AC.ctx.createGain(); env(g2, t + 0.1, 0.25, 0.4, 2.4); g2.connect(o); noise(t + 0.1, 2.6, g2, 1100, 250, 'bandpass', 0.7); // the jet's roar trailing away
 }
 function drawRadar(t) {
   const { g, c, tex } = cine.radar, s = c.width, a = t * 2.4;
@@ -3852,13 +3985,14 @@ function cabinShake(T) {
     roll: n(0.0018, 13.3, 0.7) + bump * 0.005 * Math.sin(T * 17),
   };
 }
-const C1 = 7, C2 = 14, C3 = 25, C4 = 31; // cut 2 starts at 7 s, cut 3 at 14 s, cut 4 at 25 s, cut 5 at 31 s
+const C1 = 7, C2 = 14, C3 = 25, C4 = 31, C6 = 45, C7 = 51.5, C_END = 83.5; // cut 2 at 7 s, cut 3 at 14 s, cut 4 at 25 s, cut 5 at 31 s, cut 6 at 45 s, cut 7 at 51.5 s
 const _qq = new THREE.Quaternion();
+const CUT6 = { x: 0.95, y: 0.03, z: 0.26, ly: -0.12, fov: 42 }; // cut 6: camera relative to his head
 const CUT5 = { pov: 0, dist: 0.45, up: 0.1, side: -0.3, toHand: 0.25 }; // cut 5: where the camera sits relative to the map paper
 const COCKPIT_CAM = new V3(0.05, 1.5, -2.02), COCKPIT_LOOK = new V3(-0.25, 1.05, 1.4); // cut 4 (inside the cockpit, looking back)
 const MOVIES = {
   stage1: {
-    dur: 45,
+    dur: C_END,
     subs: [
       [1.4, 5.8, '', 'アメリカ北部・カナダ国境付近'], // where the helicopter is flying (a place caption, no speaker)
       [9.6, 13.4, '副操縦士', '自動運転、解除します。ここからは手動で目的地まで向かいます。'],
@@ -3870,19 +4004,26 @@ const MOVIES = {
       [34.4, 37.6, '操縦士', 'そこの村、たった一晩で住民全員が消えてしまったそうです。'],
       [37.8, 41.4, '操縦士', '第一発見者が言うには、消える直前、彼らの目が赤いとか、燃えてるとかなんとか…'],
       [41.6, 44.6, '操縦士', '錯乱状態にあったので、どこまで信じていいのか分かりませんが。'],
+      [45.3, 48.7, '副操縦士', 'そろそろ目的地に到着します。ハーネスの装着を。'],
+      [C7 + 4.4, C7 + 8.0, '操縦士', 'あとは本部の指示の通りに作戦遂行ください'],
+      [C7 + 9.0, C7 + 10.6, '副操縦士', 'ご武運を'],
+      [C7 + 28.8, C7 + 31.7, '', '不吉な予感がする…。'], // narration (no speaker name)
     ],
-    fade: t => Math.max(1 - seg(t, 0, 0.6), t < C1 ? seg(t, 6.75, C1) : 0, t >= C1 ? 1 - seg(t, C1, C1 + 0.6) : 0, seg(t, 44.4, 45)),
-    sound: t => (t < C1 ? 'out' : 'in'),
+    fade: t => Math.max(1 - seg(t, 0, 0.6), t < C1 ? seg(t, 6.75, C1) : 0, t >= C1 && t < C6 ? 1 - seg(t, C1, C1 + 0.6) : 0,
+      t >= C6 && t < C7 ? seg(t, C7 - 0.7, C7) : 0, t >= C7 ? 1 - seg(t, C7, C7 + 0.8) : 0, seg(t, C_END - 0.7, C_END)),
+    sound: t => (t < C1 ? 'out' : t < C7 ? 'in' : t < C7 + V7.hit ? 'out' : 'off'),
+    events: [[C7 + 21.4, () => cineSonic()], [C7 + V7.hit, () => cineBoom(1.0)], [C7 + V7.hit2, () => cineBoom(1.1)], [C7 + V7.crash, () => cineBoom(0.9, true)]],
     // outside, the rotor gets louder and brighter as the helicopter comes close, and pans as it passes overhead
     level(t) {
-      if (t >= C1) return null;
-      const H = cine.heli.g.position, d = cineCam.position.distanceTo(H) || 1;
+      if (t >= C1 && t < C7) return null;
+      const H = t < C1 ? cine.heli.g.position : cine.vh.g.getWorldPosition(_p), d = cineCam.position.distanceTo(H) || 1;
       const right = _a.set(1, 0, 0).applyQuaternion(cineCam.quaternion), pan = clamp(_b.subVectors(H, cineCam.position).normalize().dot(right), -1, 1) * 0.7;
       return { vol: clamp(10 / (d + 6), 0.1, 1.3), lp: 220 + 900 / (1 + d / 6), pan };
     },
     render(t) {
-      const ext = t < C1; cine.ext.visible = ext; cine.cab.visible = !ext;
-      if (ext) this.cut1(t); else if (t < C2) this.cut2(t - C1); else if (t < C3) this.cut3(t - C2); else if (t < C4) this.cut4(t - C3); else this.cut5(t - C4);
+      const ext = t < C1, vil = t >= C7; cine.ext.visible = ext; cine.cab.visible = !ext && !vil; cine.vil.visible = vil; cineLight(vil);
+      if (ext) this.cut1(t); else if (t < C2) this.cut2(t - C1); else if (t < C3) this.cut3(t - C2); else if (t < C4) this.cut4(t - C3); else if (t < C6) this.cut5(t - C4);
+      else if (t < C7) this.cut6(t - C6); else this.cut7(t - C7);
     },
     // カット1（7秒）：雲の中から、揺れるヘリの正面が近づいてくる。最後の1秒でカメラの上を越えて後ろへ飛び去り、カメラはそれを追う
     cut1(t) {
@@ -3919,6 +4060,73 @@ const MOVIES = {
       const eye = cine.hero.head.getWorldPosition(_v); // part of the way from the map toward his eyes: roughly what he sees, a little to the side
       cineCam.position.copy(m).lerp(eye, CUT5.pov).addScaledVector(n, CUT5.dist - drift).addScaledVector(up, CUT5.up).addScaledVector(side, CUT5.side).add(_lk.set(v.x * 0.4, v.y * 0.4, 0));
       cineCam.up.copy(up); cineCam.lookAt(_w.copy(m).lerp(hand, CUT5.toHand)); cineCam.up.set(0, 1, 0); cineCam.rotateZ(v.roll * 0.4); cine.fov = 46; },
+    // カット6（6.5秒）：カメラを切り替えてカーヴァーの顔のアップ。地図に目を通す →「そろそろ目的地に…」→ 副操縦士の方を向いてうなずく → 暗転
+    cut6(t) { this.cabin(t + C6); const v = cabinShake(t + C6), H = cine.hero.head.getWorldPosition(_p);
+      // he faces +x (the right wall); the camera is in front of his face, a little low and toward the cockpit side
+      // his face and the map in his hand; the camera sits on the rear side so his turn toward the cockpit reads as a profile
+      cineCam.position.set(H.x + CUT6.x + v.x * 0.5, H.y + CUT6.y + v.y * 0.5, H.z + CUT6.z - t * 0.01); cineCam.lookAt(H.x + 0.12, H.y + CUT6.ly, H.z); cineCam.rotateZ(v.roll * 0.5); cine.fov = CUT6.fov; },
+    // カット7（32秒）：村の入り口。降りる → 会話 → 敬礼 → 離陸 → ソニックブーム → ミサイル2発 → 墜落 → 驚くカーヴァー →「不吉な予感がする…。」
+    cut7(t) {
+      cineScene.fog.color.setHex(0x6a4228); cineScene.fog.density = 0.022; cineScene.background.setHex(0x7a4a2e);
+      const V = cine.vil.position, s = heli7(t), vh = cine.vh;
+      vh.root.position.set(s.x, s.y, s.z); vh.root.rotation.set(0, s.yaw, 0); vh.g.rotation.set(s.pitch, 0, s.roll); vh.g.visible = !s.down;
+      vh.rotor.rotation.y = t * (t < V7.hit ? 24 : 14); vh.tail.rotation.x = t < V7.hit ? t * 50 : 0; vh.beacon.visible = (t * 1.4) % 1 < 0.18;
+      cineFx(t);
+      // ---- Carver: steps out of the door, walks clear, turns back to the co-pilot ----
+      const hero = cine.vhero, p = {}; let x, z, face, y = 0;
+      const stepOut = easeIO(seg(t, 0.5, 1.3)), walk = seg(t, 1.3, 3.2);
+      if (t < 1.3) { x = -0.6; z = lerp(3.3, 2.4, stepOut); y = 0.4 * (1 - stepOut) + Math.sin(Math.PI * stepOut) * 0.08; face = Math.PI; }
+      else { x = lerp(-0.6, 1.6, easeIO(walk)); z = lerp(2.4, 0.3, easeIO(walk)); face = Math.atan2(2.2, -2.1); }
+      const moving = t > 0.5 && t < 3.2; if (moving) walkPose(p, (t - 0.5) * 6.2, 0.8);
+      const turn = easeIO(seg(t, 3.2, 4.0)), toCop = Math.atan2(2.1 - 1.6, 3.55 - 0.3);
+      if (t >= 3.2) face = lerp(face, toCop, turn);
+      // he follows the helicopter with his eyes once it lifts off; flinches with his hands before his body at the blast
+      const sky = seg(t, V7.liftOff, V7.liftOff + 1), tgt = heliPoint(Math.min(t, V7.crash), ENGINE, _q);
+      const flinch = easeIO(seg(t, V7.hit + 0.05, V7.hit + 0.35)) * (1 - 0.65 * easeIO(seg(t, 27.6, 29.2)));
+      const back = flinch * 0.25;
+      const crashFace = Math.atan2(cine.crashAt.x - 1.6, cine.crashAt.z - 0.3);
+      if (sky > 0) face = lerp(face, Math.atan2(tgt.x - x, tgt.z - z), easeIO(sky) * 0.6);
+      if (t > V7.hit) face = lerp(face, crashFace, easeIO(seg(t, V7.hit, V7.crash)) * 0.7);
+      x -= Math.sin(face) * back; z -= Math.cos(face) * back;
+      hero.root.position.set(x, y, z); hero.root.rotation.y = face;
+      if (sky > 0) lookAt(p, face, _a.set(x, 0, z), tgt, 1.6, easeIO(sky));
+      p.hx = (p.hx || 0) + 0.28 * Math.sin(Math.PI * seg(t, 8.2, 8.9)); // the nod
+      if (flinch > 0) Object.assign(p, { lsx: FLINCH.sx * flinch, rsx: FLINCH.sx * 1.05 * flinch, lex: FLINCH.ex * flinch, rex: FLINCH.ex * 0.95 * flinch, lsz: FLINCH.sz * flinch, rsz: -FLINCH.sz * flinch, tx: -0.12 * flinch, hx: (p.hx || 0) + 0.1 * flinch });
+      setPose(hero, p); hero.root.updateMatrixWorld(true);
+      // ---- the crew: look over at him, speak, salute ----
+      const sal = easeIO(seg(t, 10.3, 10.9)) * (1 - easeIO(seg(t, 13.0, 13.6)));
+      for (const [h, who] of [[cine.vpilot, 0], [cine.vcopilot, 1]]) {
+        const q = SEAT(); Object.assign(q, { rsx: -0.6, rex: -0.8, lsx: -0.5, lex: -0.95 });
+        const watch = easeIO(seg(t, 2.5, 3.5)) * (1 - easeIO(seg(t, 13.6, 14.4)));
+        q.hy = (who ? 0.9 : 0.65) * watch; q.ty = 0.2 * watch;
+        q.hx = who ? talk(t, 9.0, 10.6) : talk(t, 4.4, 8.0);
+        if (sal > 0) Object.assign(q, { rsx: lerp(q.rsx, -2.5, sal), rex: lerp(q.rex, -2.2, sal), rsz: -0.35 * sal, hy: q.hy * (1 - sal * 0.5) });
+        setPose(h, q);
+      }
+      // ---- cameras ----
+      const fx = Math.sin(face), fz = Math.cos(face);
+      if (t < 4.2) { // A: from inside the gate, the helicopter landed in front of the village
+        cineCam.position.set(V.x - 10.5, 1.7, -3.2); cineCam.lookAt(V.x + 0.5, 1.6, 0.2); cine.fov = 60;
+      } else if (t < 10.6) { // B: over his shoulder, toward the co-pilot behind the glass
+        cineCam.position.set(V.x + x - fx * 1.9 + fz * 0.95, 1.95, z - fz * 1.9 - fx * 0.95); cineCam.lookAt(V.x + 2.0, 1.4, 3.4); cine.fov = 46;
+      } else if (t < 13.6) { // C: the salute, through the windscreen
+        cineCam.position.set(V.x + 5.4, 1.75, 4.2); cineCam.lookAt(V.x + 2.0, 1.4, 4.0); cine.fov = 44;
+      } else if (t < 19.4) { // D: from behind him, the helicopter climbs away from him
+        const k = easeIO(seg(t, 13.6, 19.4)); cineCam.position.set(V.x + x - fx * 2.2 + 0.3, 0.9, z - fz * 2.2 - 0.6);
+        cineCam.lookAt(V.x + s.x, lerp(2.0, s.y + 1.5, Math.min(1, k * 1.15)), s.z); cine.fov = 56;
+      } else if (t < 25.2) { // E: wide from the ground: it starts to cruise, the boom, the missiles, the fall
+        cineCam.position.set(V.x - 4.5, 1.3, -5); const lk = s.down ? cine.crashAt : heliPoint(t, ENGINE, _w);
+        const hold = _b.set(V.x + lk.x, lk.y + 1, lk.z); cineCam.lookAt(hold); cine.fov = 58;
+      } else if (t < 28.6) { // F: Carver, startled, hands up before his body; the fire lights his face
+        cineCam.position.set(V.x + x + fx * 2.9 - fz * 0.7, 1.45, z + fz * 2.9 + fx * 0.7); cineCam.lookAt(V.x + x, 1.15, z); cine.fov = 50;
+      } else { // G: over his shoulder, the smoke over the trees
+        const k = seg(t, 28.6, 32); cineCam.position.set(V.x + x - fx * (2.6 - k * 0.4) - fz * 0.75, 1.95, z - fz * (2.6 - k * 0.4) + fx * 0.75);
+        cineCam.lookAt(V.x + cine.crashAt.x, 7, cine.crashAt.z); cine.fov = 52;
+      }
+      // the fire's glow on him
+      const gl = t > V7.hit ? (t > V7.crash ? 2.2 : 1.2) + Math.sin(t * 19) * 0.5 + Math.sin(t * 7.3) * 0.4 : 0;
+      cine.glow.intensity = Math.max(0, gl); cine.glow.position.set(x + fx * 5, 3, z + fz * 5);
+    },
     // the cabin at movie time T (shared by cuts 2-6)
     cabin(T) {
       const A = T; // absolute movie time (the later cuts are timed with it)
@@ -3933,6 +4141,9 @@ const MOVIES = {
       // from cut 4 on he lifts the file (it is the map) off his knee again and studies it in his right hand; the left hand stays empty
       const mh = easeIO(seg(A, 24.9, 25.9));
       if (mh > 0) Object.assign(hp, { rsx: lerp(hp.rsx, -1.1, mh), rex: lerp(hp.rex, -1.4, mh), tx: lerp(hp.tx, 0.14, mh), hx: lerp(hp.hx, 0.55, mh), hy: lerp(hp.hy, -0.12, mh), ty: lerp(hp.ty, 0, mh) });
+      // cut 6: reading, then he turns to the co-pilot at "harness" and nods
+      const look6 = easeIO(seg(A, 48.6, 49.3)), nod6 = Math.sin(Math.PI * seg(A, 49.5, 50.2));
+      if (look6 > 0) Object.assign(hp, { hy: lerp(hp.hy, 0.95, look6), hx: lerp(hp.hx, 0.02, look6) + nod6 * 0.32, ty: lerp(hp.ty, 0.22, look6) });
       setPose(cine.hero, hp);
       cine.hero.root.updateMatrixWorld(true);
       // co-pilot: checks the buttons and the radar, then speaks
@@ -3942,7 +4153,7 @@ const MOVIES = {
       // cut 4: one hand up on the overhead panel, checking switches; later his reassuring last line
       const opsC = Math.sin(Math.PI * seg(A, 25.0, 27.6));
       cp.lsx = lerp(cp.lsx, -2.6, opsC) + Math.sin(A * 11) * 0.05 * opsC; cp.lex = lerp(cp.lex, -0.25, opsC); cp.hx += -0.35 * opsC + talk(A, 31.3, 34.1);
-      const glance = Math.sin(Math.PI * seg(A, 31.1, 34.4)); cp.hy += 1.2 * glance; cp.ty = (cp.ty || 0) + 0.3 * glance;
+      const glance = Math.sin(Math.PI * seg(A, 31.1, 34.4)) + Math.sin(Math.PI * seg(A, 45.1, 50.6)); cp.hy += 1.2 * glance; cp.ty = (cp.ty || 0) + 0.3 * glance; cp.hx += talk(A, 45.3, 48.7);
       setPose(cine.copilot, cp);
       // pilot: hands on the controls, nods at the co-pilot, then glances back at the hero while he speaks
       const nod = Math.sin(Math.PI * seg(T, 10.9, 11.4)) * 0.3, back = Math.sin(Math.PI * seg(T, 13.6, 16.2)), pp = SEAT();
@@ -4004,7 +4215,8 @@ function renderCine(t) {
   if (M.level) heliLevel(M.level(t));
 }
 function updateCine(dt) {
-  if (!cine.paused) cine.t += dt;
+  const prev = cine.t; if (!cine.paused) cine.t += dt;
+  for (const [at, fn] of cine.movie.events || []) if (prev < at && cine.t >= at) fn();
   if (cine.t >= cine.movie.dur) { endMovie(); return; }
   renderCine(cine.t);
 }
@@ -4081,4 +4293,4 @@ buildStage('village');
 requestAnimationFrame(frame);
 
 // debug handle for automated testing
-window.__game = { cine, cineCam, CUT5, playMovie, renderCine, playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
+window.__game = { cine, cineCam, CUT5, CUT6, FLINCH, playMovie, renderCine, playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
