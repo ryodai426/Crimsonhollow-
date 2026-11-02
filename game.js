@@ -2031,6 +2031,8 @@ const STAGES = {
   },
   city: {
     id: 'city', build: buildCity, start: [0, 22], trader: [8.0, 11.6],
+    // TEST: start at chapter 4 ("警察署へ"), a short run from the station door, so both the street and the station interior are quick to check
+    testStart: { wave: 3, pos: [0, -14], goAt: 2 },
     zones: [[-50, 0, -50, 0], [0, 50, -50, 0], [-50, 0, 0, 50], [0, 50, 0, 50]],
     waves: [
       { title: 'CITY 1', sub: '燃える大通り', atmos: 'cityFire', total: 11, conc: 5, mix: { zombie: 0.8, cop: 0.2 }, obj: 'ゾンビの群れを食い止めろ' },
@@ -2973,7 +2975,8 @@ function updateDirector(dt) {
     if (director.spawned < w.total && alive < w.conc) { director.spawnT -= dt; if (director.spawnT <= 0) { spawnEnemy(pickType(w.mix)); director.spawned++; director.spawnT = w.explore ? rand(2, 4.5) : rand(0.2, 0.6); } }
     if (!director.goShown) setH('obj', w.obj);
     if (director.proT > 1.2 && !director.ambushShown && !w.explore) { director.ambushShown = true; showBanner('AMBUSH', 'ゾンビの群れだ！'); sfx.groan(player.pos, 0.8); }
-    if (director.proT > (w.explore ? w.hint || 150 : 5) && !director.goShown) {
+    const goAt = w.explore ? w.hint || 150 : STAGE.testStart?.wave === director.wave ? STAGE.testStart.goAt : 5;
+    if (director.proT > goAt && !director.goShown) {
       director.goShown = true; showBanner('', w.go || '警察署に入れ！'); marker.position.set(goal[0], 0, goal[1]); marker.visible = true;
       setH('obj', w.goObj || '警察署に入れ！（光っている入口へ）'); sfx.bell();
     }
@@ -3519,6 +3522,7 @@ $('pause').addEventListener('click', e => { if (e.target.id === 'pause') resumeG
 function resetWorldForWave() {
   clearActors();
   player.pos.copy(START_POS); player.vel.set(0, 0, 0); player.yaw = 0; player.pitch = -0.08; player.state = 'normal'; player.dead = false;
+  const ts = STAGE.testStart; if (ts && director.wave >= ts.wave) player.pos.set(ts.pos[0], 0, ts.pos[1]);
   player.grabbedBy = null; player.reloadT = 0; player.invuln = 1; player.dodgeT = 0; ph.root.rotation.x = 0;
   $('bossBar').classList.add('hidden');
 }
@@ -3526,11 +3530,11 @@ function startGame(stageId = STAGE.id) {
   initAudio();
   inv = newInventory(); Object.assign(stats, { kills: 0, headKills: 0, shots: 0, hits: 0, heads: 0, time: 0, deaths: 0, dodges: 0 });
   player.hp = player.maxHp = 100; player.weapon = 'hg'; for (const k in guns) guns[k].visible = k === 'hg';
-  buildStage(stageId); resetWorldForWave();
+  buildStage(stageId); const ts = STAGE.testStart; director.wave = ts ? ts.wave : 0; resetWorldForWave();
   ['title', 'dead', 'win'].forEach(id => $(id).classList.add('hidden'));
   $('hud').classList.remove('hidden'); if (isTouch) $('touch').classList.remove('hidden');
   game.state = 'play'; if (!isTouch) canvas.requestPointerLock?.();
-  startWave(0);
+  startWave(director.wave);
 }
 function continueGame() {
   initAudio();
@@ -3801,13 +3805,15 @@ function buildCine() {
   { const l = new THREE.PointLight(0xdfe8f0, 1.6, 6, 1.5); l.position.set(0.3, 1.0, 2.2); cab.add(l); const p = new THREE.PointLight(0x70ff90, 1.2, 2.5, 1.5); p.position.set(0, 1.0, -1.4); cab.add(p); }
   // cast: the hero (same look as in play) and two pilots
   const hero = makeHumanoid({ shirt: mat(0x5a3a22, { rough: 0.6 }), sleeve: mat(0x5a3a22, { rough: 0.6 }), vest: mat(0x2a2620), pants: mat(0x2a3240), skin: mat(0xc9a07e), hair: mat(0x3a2818), hairBack: true, glove: mat(0x1a1612), boots: mat(0x1e1712) });
-  const doc = grp(hero.armR.hand, 0, -0.06, 0.06); doc.rotation.x = -1.1;
-  part(doc, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, 0); cine.docPaper = part(doc, 0.21, 0.28, 0.005, mat(0xd8d2c0), 0, 0, 0.01); cine.doc = doc; part(doc, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.09, 0.014);
+  const docAt = grp(hero.armR.hand, 0, -0.06, 0.06); docAt.rotation.x = -1.1;
+  // he holds the board by its near right corner (the edge toward him), so the hand never covers the circled village at the top
+  const doc = grp(docAt, -0.09, 0.2, 0);
+  part(doc, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, 0); cine.docPaper = part(doc, 0.21, 0.28, 0.005, mat(0xd8d2c0), 0, 0, 0.01); cine.doc = doc; part(doc, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.15, 0.014);
   const copilot = makeHumanoid(pilotLook(0x4a5038)), pilot = makeHumanoid(pilotLook(0x464c36));
   addHelmet(copilot); addHelmet(pilot);
   for (const [h, x, z, ry] of [[hero, -0.92, 1.35, Math.PI / 2], [copilot, -0.5, -0.83, Math.PI], [pilot, 0.5, -0.83, Math.PI]]) { h.root.position.set(x, 0, z); h.root.rotation.y = ry; cab.add(h.root); charify(h.root); }
   Object.assign(cine, { hero, copilot, pilot });
-  // the map Carver holds in his left hand: mountains, a river, roads, and the target village circled in red
+  // the map in Carver's file: mountains, a river, roads, and the target village circled in red
   const mapTex = canvasTex(256, (g, s) => {
     g.fillStyle = '#d8ccaa'; g.fillRect(0, 0, s, s);
     g.fillStyle = 'rgba(70,110,50,.45)'; for (let i = 0; i < 16; i++) { g.beginPath(); g.arc(rand(0, s), rand(0, s), rand(14, 34), 0, 7); g.fill(); }
@@ -3820,10 +3826,8 @@ function buildCine() {
     g.lineWidth = 3; g.beginPath(); g.moveTo(205, 40); g.lineTo(192, 56); g.stroke();
     g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 2; for (const x of [85, 171]) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, s); g.stroke(); } g.beginPath(); g.moveTo(0, 128); g.lineTo(s, 128); g.stroke(); // folds
   });
-  // the file he reads in cuts 2-3 IS the map: the same board, paper and tab, shown in his left hand from cut 4 on
+  // the file he reads in his right hand IS the map (cut 5 shows it up close)
   const mapM = new THREE.MeshStandardMaterial({ map: mapTex, roughness: 0.9 }); cine.docPaper.material = mapM;
-  cine.map = new THREE.Group(); cine.map.visible = false; cab.add(cine.map);
-  part(cine.map, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, -0.012); part(cine.map, 0.21, 0.28, 0.005, mapM, 0, 0, 0); part(cine.map, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.15, 0.003);
 }
 function drawRadar(t) {
   const { g, c, tex } = cine.radar, s = c.width, a = t * 2.4;
@@ -3849,11 +3853,14 @@ function cabinShake(T) {
   };
 }
 const C1 = 7, C2 = 14, C3 = 25, C4 = 31; // cut 2 starts at 7 s, cut 3 at 14 s, cut 4 at 25 s, cut 5 at 31 s
+const _qq = new THREE.Quaternion();
+const CUT5 = { pov: 0, dist: 0.45, up: 0.1, side: -0.3, toHand: 0.25 }; // cut 5: where the camera sits relative to the map paper
 const COCKPIT_CAM = new V3(0.05, 1.5, -2.02), COCKPIT_LOOK = new V3(-0.25, 1.05, 1.4); // cut 4 (inside the cockpit, looking back)
 const MOVIES = {
   stage1: {
     dur: 45,
     subs: [
+      [1.4, 5.8, '', 'アメリカ北部・カナダ国境付近'], // where the helicopter is flying (a place caption, no speaker)
       [9.6, 13.4, '副操縦士', '自動運転、解除します。ここからは手動で目的地まで向かいます。'],
       [14.5, 18.5, '操縦士', 'にしても、今回の任務は不気味ですよね。カーヴァーさんも、あんまり気乗りしないでしょう。'],
       [18.8, 20.9, '副操縦士', 'いわゆる貧乏くじってやつですね。'],
@@ -3903,11 +3910,15 @@ const MOVIES = {
     // カット4（6秒）：コックピットから操縦士2人と主人公の方を向く。計器を操作して確認する操縦士たち →「ただ、今回の任務は…」
     cut4(t) { this.cabin(t + C3); const C = cine.cab.position, v = cabinShake(t + C3);
       cineCam.position.set(C.x + COCKPIT_CAM.x + v.x, COCKPIT_CAM.y + v.y, COCKPIT_CAM.z); cineCam.lookAt(C.x + COCKPIT_LOOK.x, COCKPIT_LOOK.y, COCKPIT_LOOK.z); cineCam.rotateZ(v.roll); cine.fov = 74; },
-    // カット5（14秒）：同じ位置から、カーヴァーが左手に持つ地図へズーム。赤丸の村をじっと見る。副操縦士「もちろん…」のあと、操縦士の話が続く
-    cut5(t) { this.cabin(t + C4); const C = cine.cab.position, v = cabinShake(t + C4), k = easeIO(seg(t, 0, 3.2)), m = cine.mapPos;
-      const from = _a.set(C.x + COCKPIT_CAM.x, COCKPIT_CAM.y, COCKPIT_CAM.z), look0 = _b.set(C.x + COCKPIT_LOOK.x, COCKPIT_LOOK.y, COCKPIT_LOOK.z);
-      const to = _c.copy(cine.mapN).multiplyScalar(0.4).add(m), s = 1 - k * 0.6; // end: 40 cm in front of the map (his fingertips stay in frame)
-      cineCam.position.copy(from).lerp(to, k).add(_lk.set(v.x * s, v.y * s, 0)); cineCam.lookAt(look0.lerp(m, k)); cineCam.rotateZ(v.roll * s); cine.fov = lerp(74, 46, k); },
+    // カット5（14秒）：カメラを切り替えて、カーヴァーの手元のショット。右手の資料（地図）と、赤丸の目的地の印。副操縦士「もちろん…」のあと、操縦士の話が続く
+    cut5(t) { this.cabin(t + C4); const v = cabinShake(t + C4);
+      // framed from the paper itself: a little in front of the map, from his side (over his knee), so his glove and the red circle are both in the shot
+      const P = cine.docPaper, m = P.getWorldPosition(_p), q = P.getWorldQuaternion(_qq), n = _a.set(0, 0, 1).applyQuaternion(q);
+      const up = _b.set(0, 1, 0).applyQuaternion(q), side = _c.set(1, 0, 0).applyQuaternion(q), hand = cine.hero.armR.hand.getWorldPosition(_q);
+      const drift = t * 0.004; // a very slow push in while he stares at it
+      const eye = cine.hero.head.getWorldPosition(_v); // part of the way from the map toward his eyes: roughly what he sees, a little to the side
+      cineCam.position.copy(m).lerp(eye, CUT5.pov).addScaledVector(n, CUT5.dist - drift).addScaledVector(up, CUT5.up).addScaledVector(side, CUT5.side).add(_lk.set(v.x * 0.4, v.y * 0.4, 0));
+      cineCam.up.copy(up); cineCam.lookAt(_w.copy(m).lerp(hand, CUT5.toHand)); cineCam.up.set(0, 1, 0); cineCam.rotateZ(v.roll * 0.4); cine.fov = 46; },
     // the cabin at movie time T (shared by cuts 2-6)
     cabin(T) {
       const A = T; // absolute movie time (the later cuts are timed with it)
@@ -3919,19 +3930,11 @@ const MOVIES = {
       const r = easeIO(seg(T, 8.2, 9.4)), toPilots = easeIO(seg(T, 12.8, 13.6)) * (1 - easeIO(seg(T, 21.6, 22.4))), hp = SEAT();
       Object.assign(hp, { rsx: lerp(-1.05, -0.5, r), rex: lerp(-1.35, -0.45, r), lsx: lerp(-0.55, -0.4, r), lex: lerp(-0.95, -0.35, r), lsz: 0.15,
         tx: lerp(0.14, 0.06, r), hx: lerp(0.5, 0.22, r) - toPilots * 0.15, hy: -0.2 * easeIO(seg(T, 9.0, 10.4)) * (1 - toPilots) + toPilots * 0.75, ty: toPilots * 0.2 });
-      // from cut 4 on he holds the map up in his left hand and studies it
-      const mh = easeIO(seg(A, 24.9, 25.7));
-      if (mh > 0) Object.assign(hp, { lsx: lerp(hp.lsx, -1.0, mh), lex: lerp(hp.lex, -1.5, mh), lsz: lerp(0.15, 0.4, mh), hx: lerp(hp.hx, 0.42, mh), hy: lerp(hp.hy, 0.32, mh), ty: lerp(hp.ty, 0.12, mh) });
+      // from cut 4 on he lifts the file (it is the map) off his knee again and studies it in his right hand; the left hand stays empty
+      const mh = easeIO(seg(A, 24.9, 25.9));
+      if (mh > 0) Object.assign(hp, { rsx: lerp(hp.rsx, -1.1, mh), rex: lerp(hp.rex, -1.4, mh), tx: lerp(hp.tx, 0.14, mh), hx: lerp(hp.hx, 0.55, mh), hy: lerp(hp.hy, -0.12, mh), ty: lerp(hp.ty, 0, mh) });
       setPose(cine.hero, hp);
-      const H = cine.hero; H.root.updateMatrixWorld(true); cine.map.visible = mh > 0.5; cine.doc.visible = !cine.map.visible;
-      if (cine.map.visible) {
-        // the map sits in his hand, turned between his eyes and the cockpit so both he and the camera can read it
-        const hand = H.armL.hand.getWorldPosition(_p), eye = H.head.getWorldPosition(_q), cab = cine.cab.position;
-        const aim = _w.set(cab.x + COCKPIT_CAM.x, COCKPIT_CAM.y, COCKPIT_CAM.z).lerp(eye, 0.55);
-        cine.map.position.copy(hand).add(_v.subVectors(aim, hand).normalize().multiplyScalar(0.06)).add(_v.set(0, 0.07, 0));
-        cine.map.parent.worldToLocal(cine.map.position); cine.map.lookAt(aim); cine.map.updateMatrixWorld(true);
-        cine.mapPos = cine.map.getWorldPosition(cine.mapPos || new V3()); cine.mapN = _v.subVectors(aim, cine.mapPos).normalize().clone();
-      }
+      cine.hero.root.updateMatrixWorld(true);
       // co-pilot: checks the buttons and the radar, then speaks
       const reach = Math.sin(Math.PI * seg(T, 5.2, 7.0)), cp = SEAT();
       Object.assign(cp, { rsx: lerp(-0.6, -1.4, reach) + Math.sin(T * 10) * 0.04 * reach, rex: lerp(-0.8, -0.15, reach), lsx: -0.55, lex: -0.9, hx: lerp(0.1, 0.35, reach) + talk(T, 7.1, 10.9) + talk(T, 16.3, 22.2),
@@ -4078,4 +4081,4 @@ buildStage('village');
 requestAnimationFrame(frame);
 
 // debug handle for automated testing
-window.__game = { cine, playMovie, renderCine, playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
+window.__game = { cine, cineCam, CUT5, playMovie, renderCine, playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
