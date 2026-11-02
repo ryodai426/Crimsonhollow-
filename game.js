@@ -485,6 +485,94 @@ function makeHouse(x, z, w, d, h, wallMat, ridgeX = false) {
   addSolid(x, z, w, d, h + rh);
   return g;
 }
+// ---- village houses you can walk into (STAGE 1): hollow walls with a doorway toward the plaza, a floor, a ceiling,
+// furniture, and things to examine (letters = clues, drawers and chests = items, the rest = a line of description) ----
+const HOUSES = [], LOOKS = [];
+const houseLight = new THREE.PointLight(0xffb070, 0, 10, 1.5); scene.add(houseLight); // lights the house the player is in // HOUSES: {x,z,w,d,h, door, out, ...}; LOOKS: interactables {pos, kind, title, text, item, clue, read, mark}
+function makeHouseOpen(x, z, w, d, h, wallMat, ridgeX, kit) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); world.add(g);
+  const T = 0.3, DW = 2.4, unit = wallMat === M.plaster ? 4 : 2.5;
+  const toward = Math.abs(x) > Math.abs(z) ? (x > 0 ? 'nx' : 'px') : (z > 0 ? 'nz' : 'pz');
+  // the four walls (the door side is split around a doorway, with a lintel over it)
+  const wall = (cx, cz, ww, dd, hh = h, y0 = 0) => { meshAt(scaleBoxUV(new THREE.BoxGeometry(ww, hh, dd), ww, hh, dd, unit), wallMat, cx, y0 + hh / 2, cz, g); };
+  const solid = (cx, cz, ww, dd) => addSolid(x + cx, z + cz, ww, dd, h, { navPad: 0.2 });
+  for (const k of ['px', 'nx', 'pz', 'nz']) {
+    const alongX = k === 'pz' || k === 'nz', len = alongX ? w : d, off = (alongX ? d : w) / 2 - T / 2, sg = k[0] === 'p' ? 1 : -1;
+    const at = (a, b) => (alongX ? [a, sg * off] : [sg * off, a]);
+    if (k !== toward) { const [cx, cz] = at(0, 0); wall(cx, cz, alongX ? len : T, alongX ? T : len); solid(cx, cz, alongX ? len : T, alongX ? T : len); continue; }
+    const seg = (len - DW) / 2;
+    for (const sd of [-1, 1]) { const [cx, cz] = at(sd * (DW / 2 + seg / 2), 0); wall(cx, cz, alongX ? seg : T, alongX ? T : seg); solid(cx, cz, alongX ? seg : T, alongX ? T : seg); }
+    const [cx, cz] = at(0, 0); wall(cx, cz, alongX ? DW : T, alongX ? T : DW, h - 2.6, 2.6);
+  }
+  // floor, ceiling, roof
+  { const f = meshAt(new THREE.PlaneGeometry(w - 0.1, d - 0.1), M.plank, 0, 0.025, 0, g, false); f.rotation.x = -Math.PI / 2; f.receiveShadow = true;
+    const c = meshAt(new THREE.PlaneGeometry(w, d), mat(0x2a1e14, { rough: 1 }), 0, h - 0.01, 0, g, false); c.rotation.x = Math.PI / 2; }
+  const rw = (ridgeX ? d : w) + 0.8, rl = (ridgeX ? w : d) + 0.8, rh = rw * 0.42;
+  const shape = new THREE.Shape(); shape.moveTo(-rw / 2, 0); shape.lineTo(rw / 2, 0); shape.lineTo(0, rh); shape.lineTo(-rw / 2, 0);
+  const rg = new THREE.ExtrudeGeometry(shape, { depth: rl, bevelEnabled: false }); rg.translate(0, 0, -rl / 2);
+  const uvs = rg.attributes.uv; for (let i = 0; i < uvs.count; i++) uvs.setXY(i, uvs.getX(i) * 0.3, uvs.getY(i) * 0.3);
+  const roof = meshAt(rg, M.roof, 0, h, 0, g); if (ridgeX) roof.rotation.y = Math.PI / 2;
+  if (Math.random() < 0.7) meshAt(new THREE.BoxGeometry(0.7, 2.2, 0.7), M.stone, rand(-w / 4, w / 4), h + rh * 0.6, rand(-d / 4, d / 4), g);
+  // local frame: f = outward normal of the door wall, r = along it; L(u, b) -> local x,z (b > 0 toward the back wall)
+  const F = { px: [1, 0], nx: [-1, 0], pz: [0, 1], nz: [0, -1] }[toward], fx = F[0], fz = F[1], R = [-fz, fx];
+  const W = toward[1] === 'x' ? d : w, D = toward[1] === 'x' ? w : d;
+  const L = (u, b) => [R[0] * u - fx * b, R[1] * u - fz * b];
+  const doorL = L(0, -D / 2), face = Math.atan2(fx, fz);
+  // the door leaf stands open against the inside wall
+  { const hinge = grp(g, doorL[0] + R[0] * (DW / 2 - 0.05) - fx * 0.35, 0, doorL[1] + R[1] * (DW / 2 - 0.05) - fz * 0.35);
+    hinge.rotation.y = Math.atan2(-fz, fx) + 0.12; meshAt(new THREE.BoxGeometry(1.3, 2.5, 0.08), M.door, -0.65, 1.25, 0, hinge); }
+  // windows, outside and inside
+  for (const k of ['px', 'nx', 'pz', 'nz']) {
+    const alongX = k === 'pz' || k === 'nz', along = alongX ? w : d, n = { px: [1, 0], nx: [-1, 0], pz: [0, 1], nz: [0, -1] }[k], half = (alongX ? d : w) / 2, wr = Math.atan2(n[0], n[1]);
+    for (const off of [-along / 3, along / 3]) {
+      if (k === toward && Math.abs(off) < DW / 2 + 0.6) continue;
+      for (const side of [1, -1]) {
+        const m = side > 0 ? (Math.random() < 0.45 ? M.winLit : (Math.random() < 0.2 ? M.winRed : M.winDark)) : M.winDark;
+        const dist = side > 0 ? half + 0.02 : half - T - 0.02;
+        const win = meshAt(new THREE.PlaneGeometry(0.9, 1.0), m, n[0] * dist + (alongX ? off : 0), h * 0.58, n[1] * dist + (alongX ? 0 : off), g, false);
+        win.rotation.y = side > 0 ? wr : wr + Math.PI;
+      }
+    }
+  }
+  const H = { idx: HOUSES.length, x, z, w, d, h, face, g, W, D,
+    door: new V3(x + doorL[0], 0, z + doorL[1]), out: new V3(fx, 0, fz), L: (u, b) => { const l = L(u, b); return new V3(x + l[0], 0, z + l[1]); } };
+  HOUSES.push(H);
+  furnish(H, kit || {});
+  return g;
+}
+// is (x,z) inside a house? returns the house or null
+function houseAt(x, z) { for (const H of HOUSES) if (Math.abs(x - H.x) < H.w / 2 - 0.15 && Math.abs(z - H.z) < H.d / 2 - 0.15) return H; return null; }
+// furniture: placed in the house frame (u along the door wall, b from the centre toward the back)
+const FURN = {
+  table: (g, H, u, b) => { const top = part(g, 1.5, 0.08, 0.9, M.wood, 0, 0.78, 0); void top; for (const [a, c] of [[-0.65, -0.35], [0.65, -0.35], [-0.65, 0.35], [0.65, 0.35]]) part(g, 0.08, 0.76, 0.08, M.wood, a, 0.38, c);
+    const ch = part(g, 0.45, 0.06, 0.45, M.wood, 0.3, 0.46, 0.75); ch.rotation.y = 0.3; const cb = part(g, 0.45, 0.5, 0.06, M.wood, 0.3, 0.72, 0.97); cb.rotation.y = 0.3;
+    const fall = grp(g, -0.7, 0.24, -0.85); fall.rotation.z = Math.PI / 2; part(fall, 0.45, 0.06, 0.45, M.wood, 0, 0, 0); part(fall, 0.45, 0.5, 0.06, M.wood, 0, 0.25, 0.22); // a chair knocked over
+    return { w: 1.5, d: 0.9, top: 0.84 }; },
+  bed: (g) => { part(g, 1.1, 0.35, 2.0, M.wood, 0, 0.2, 0); part(g, 1.0, 0.16, 1.9, mat(0x8a8272, { rough: 1 }), 0, 0.45, 0); part(g, 0.7, 0.12, 0.35, mat(0xb8b0a0, { rough: 1 }), 0, 0.58, -0.7); part(g, 1.1, 0.8, 0.08, M.wood, 0, 0.45, -1.0);
+    part(g, 0.5, 0.01, 0.4, mat(0x4a0a08), 0.15, 0.54, 0.2); return { w: 1.1, d: 2.0, top: 0.6 }; },
+  dresser: (g) => { part(g, 1.3, 1.5, 0.5, M.wood, 0, 0.75, 0); for (let i = 0; i < 3; i++) part(g, 1.1, 0.36, 0.04, mat(0x4a3420), 0, 0.35 + i * 0.45, -0.26); return { w: 1.3, d: 0.5, top: 1.5 }; },
+  chest: (g) => { part(g, 1.0, 0.55, 0.55, M.crate, 0, 0.28, 0); part(g, 1.04, 0.08, 0.6, M.wood, 0, 0.58, 0); return { w: 1.0, d: 0.55, top: 0.62 }; },
+  shelf: (g) => { part(g, 1.4, 1.9, 0.4, M.wood, 0, 0.95, 0); for (let i = 0; i < 4; i++) { part(g, 1.3, 0.04, 0.36, mat(0x3a2a18), 0, 0.3 + i * 0.45, 0); for (let j = 0; j < 3; j++) part(g, 0.12, 0.2, 0.12, mat(pick([0x6a5a3a, 0x3a4a5a, 0x5a2a20])), -0.45 + j * 0.4 + rand(-0.1, 0.1), 0.42 + i * 0.45, 0); } return { w: 1.4, d: 0.4, top: 1.9 }; },
+  hay: (g) => { const h = part(g, 1.4, 1.0, 1.0, M.hay, 0, 0.5, 0); void h; return { w: 1.4, d: 1.0, top: 1.0 }; },
+};
+const paperM = new THREE.MeshStandardMaterial({ color: 0xe8e0c8, emissive: 0x3a3424, roughness: 1 });
+const markM = new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.85, depthWrite: false });
+function furnish(H, kit) {
+  const halfW = H.W / 2 - 0.3, halfD = H.D / 2 - 0.3;
+  for (const it of kit.items || []) {
+    const [type, uu, bb, rot = 0] = it.at; // uu, bb in -1..1: from wall to wall (along the door wall / from the door to the back)
+    const g = grp(world, 0, 0, 0), sz = FURN[type](g, H), turned = Math.abs(Math.sin(rot)) > 0.5;
+    const aw = (turned ? sz.d : sz.w) / 2, ad = (turned ? sz.w : sz.d) / 2;
+    const pos = H.L(uu * Math.max(0, halfW - 0.05 - aw), bb * Math.max(0, halfD - 0.05 - ad)); g.position.copy(pos); g.rotation.y = H.face + Math.PI + rot;
+    g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    const along = Math.abs(Math.cos(g.rotation.y)) > 0.5; addSolid(pos.x, pos.z, along ? sz.w : sz.d, along ? sz.d : sz.w, sz.top, { navPad: 0.3 });
+    if (!it.look) continue;
+    const top = new V3(pos.x, sz.top + 0.03, pos.z);
+    if (it.look.clue) { const pp = meshAt(new THREE.PlaneGeometry(0.3, 0.4), paperM, top.x, top.y, top.z, world, false); pp.rotation.set(-Math.PI / 2, 0, rand(-0.4, 0.4)); }
+    const mark = meshAt(new THREE.OctahedronGeometry(0.09, 0), markM, top.x, top.y + 0.35, top.z, world, false);
+    LOOKS.push({ ...it.look, pos: top, mark, read: false, house: H.idx, name: it.look.name || { table: '食卓', bed: 'ベッド', dresser: 'タンス', chest: '木箱', shelf: '棚', hay: '干し草' }[type] });
+  }
+}
 function makePine(x, z, s = 1) {
   const g = new THREE.Group(); g.position.set(x, 0, z); world.add(g);
   meshAt(new THREE.CylinderGeometry(0.12 * s, 0.22 * s, 2.2 * s, 6), M.bark, 0, 1.1 * s, 0, g);
@@ -563,18 +651,13 @@ function buildVillage() {
 
 
   // ---- village layout ----
-  makeHouse(-18, -8, 10, 8, 4.5, M.plaster);
-  makeHouse(-20, 11, 8, 10, 4.2, M.plank, true);
-  makeHouse(18, -11, 9, 9, 5, M.stone);
-  makeHouse(21, 12, 10, 7, 4.2, M.plaster);
-  makeHouse(-6, 23, 8, 7, 4, M.stone);
-  makeHouse(9, 27, 9, 8, 4.5, M.plank);
-  makeHouse(-32, 27, 12, 10, 6, M.plank, true); // barn
-  makeHouse(32, -27, 8, 8, 4.2, M.plaster);
-  makeHouse(-32, -25, 9, 8, 4.5, M.stone);
-  makeHouse(34, 30, 7, 7, 4, M.plank);
-  makeHouse(-36, 0, 6, 9, 4, M.plaster, true);
-  makeHouse(36, -4, 6, 8, 4, M.stone, true);
+  // every house but the church can be entered (STAGE 1-1: search them one by one). Contents: VILLAGE_KITS
+  HOUSES.length = LOOKS.length = 0;
+  [[-18, -8, 10, 8, 4.5, M.plaster], [-20, 11, 8, 10, 4.2, M.plank, true], [18, -11, 9, 9, 5, M.stone], [21, 12, 10, 7, 4.2, M.plaster],
+   [-6, 23, 8, 7, 4, M.stone], [9, 27, 9, 8, 4.5, M.plank], [-32, 27, 12, 10, 6, M.plank, true], [32, -27, 8, 8, 4.2, M.plaster],
+   [-32, -25, 9, 8, 4.5, M.stone], [34, 30, 7, 7, 4, M.plank], [-36, 0, 6, 9, 4, M.plaster, true], [36, -4, 6, 8, 4, M.stone, true]]
+    .forEach((a, i) => makeHouseOpen(a[0], a[1], a[2], a[3], a[4], a[5], !!a[6], VILLAGE_KITS[i]));
+  houseLight.visible = true;
 
   // church
   {
@@ -667,7 +750,7 @@ function buildVillage() {
     const o = new THREE.Object3D(); const col = new THREE.Color(); let k = 0;
     while (k < n) {
       const x = rand(-48, 48), z = rand(-48, 48);
-      if (Math.hypot(x, z) < 15.5) continue;
+      if (Math.hypot(x, z) < 15.5 || HOUSES.some(H => Math.abs(x - H.x) < H.w / 2 + 0.3 && Math.abs(z - H.z) < H.d / 2 + 0.3)) continue;
       o.position.set(x, 0, z); o.rotation.set(rand(-.3, .3), rand(0, 6), rand(-.3, .3)); o.scale.setScalar(rand(0.6, 1.6)); o.updateMatrix();
       im.setMatrixAt(k, o.matrix); im.setColorAt(k, col.setHSL(rand(0.1, 0.17), 0.35, rand(0.12, 0.25))); k++;
     }
@@ -709,7 +792,7 @@ function homeField(x, z) {
 }
 // is the player inside this enemy's zone? (a body right next to the player keeps fighting across a zone line)
 function engaged(e, dist) {
-  if (!STAGE.zones || e.boss || player.dead) return true;
+  if (!STAGE.zones || e.boss || e.always || player.dead) return true;
   return zoneOf(player.pos.x, player.pos.z) === e.zone || (dist < 3.5 && e.los);
 }
 function navUpdate(tx, tz) {
@@ -1263,11 +1346,58 @@ const ETYPES = {
   origin: { hp: 2600, speed: 2.0, dmg: 40, range: 4.0, weapon: 'claw', scale: 1.9, bulk: 1.45, boss: true, coreHue: 0.3 },
 };
 
+// ---- STAGE 1-1: what is in each house (same order as the houses in buildVillage) ----
+// letters (clue: true) are fragments of what happened; drawers and chests hold items; the rest is a line of description
+const NOTE = {
+  mayor: { id: 'mayor', clue: true, name: '村長の日誌', title: '村長の日誌', text: '三日前から、日が沈むと霧が赤く見える。井戸の水が鉄のような味がする。\n\n街から来た「調査団」を名乗る男たちが、井戸の水を瓶に詰めて持ち帰った。礼だと言って置いていった薬を、村の者はみな飲んだ。' },
+  child: { id: 'child', clue: true, name: '子どもの手紙', title: '子どもの手紙', text: 'ママへ\n\nきのうから、パパの目が赤いの。\nよるになると、だまって教会のほうへ歩いていく。\nよんでも、ふりむいてくれない。' },
+  team2: { id: 'team2', clue: true, name: '調査班の記録', title: '調査班 第2班の記録', text: '村人の瞳に赤い光を確認。痛みへの反応なし。\n\n本部に報告したが、返ってきた指示は「採取を続けろ」だけだ。\n先に入った第1班とは、いまだに連絡が取れない。' },
+  doctor: { id: 'doctor', clue: true, name: '医者のカルテ', title: '村医者のカルテ', text: '発熱、意識の混濁、痛みを感じなくなる。\n患者は全員、首の後ろに小さな刺し傷がある。\n\n……今朝、鏡を見た。\n私の首にも、同じ傷があった。' },
+  ledger: { id: 'ledger', clue: true, name: '雑貨屋の帳簿', title: '雑貨屋の帳簿', text: '先月、街の製薬会社の印が押された木箱を十箱、教会へ運んだ。\n中身は聞くなと言われた。運び賃は相場の三倍。\n\n――あの箱が来てから、夜に鐘が鳴るようになった。' },
+  last: { id: 'last', clue: true, name: '走り書きのメモ', title: '調査隊員の走り書き', text: '迎えのヘリが来ない。無線もつながらない。\n奴らは日が沈むと集まってくる。鐘の音に呼ばれるように。\n\nもしこれを読む者がいたら、教会には近づくな。' },
+  priest: { id: 'priest', clue: true, name: '神父の手記', title: '神父の手記', text: '鐘を鳴らしてはならない。\n鐘が鳴れば、彼らは集まる。\n\n主よ、私はあの箱を受け取るべきではなかった。' },
+};
+const LOOK_ITEM = {
+  ammo10: { title: 'タンスの中', text: 'ハンドガンの弾が10発あった。', item: { ammo: 10 } },
+  ammo15: { title: '木箱の中', text: 'ハンドガンの弾が15発あった。', item: { ammo: 15 } },
+  herb: { title: '中を探した', text: 'グリーンハーブを見つけた。', item: { herbG: 1 } },
+  red: { title: '中を探した', text: 'レッドハーブを見つけた。グリーンハーブと調合すると効き目が増す。', item: { herbR: 1 } },
+  gold5: { title: '木箱の中', text: '古い革袋に、500G が入っていた。', item: { gold: 500 } },
+  gold3: { title: '木箱の中', text: '300G を見つけた。', item: { gold: 300 } },
+  gren: { title: '木箱の中', text: '手榴弾が1個入っていた。', item: { gren: 1 } },
+};
+const LOOK_TEXT = {
+  bed: { title: 'ベッド', text: 'シーツに乾いた血の跡がある。誰かが慌てて起き上がったように乱れている。' },
+  bed2: { title: 'ベッド', text: '枕元に、子どもの人形が落ちている。' },
+  table: { title: '食卓', text: '食べかけのスープが冷え切っている。椅子が倒れたままだ。' },
+  table2: { title: '食卓', text: '皿が四人分並んでいる。誰も手をつけていない。' },
+  table3: { title: '食卓', text: '飲みかけの薬の小瓶がある。ラベルは剥がされている。' },
+  dresser: { title: 'タンス', text: '服が乱暴に引き出されたまま、散らかっている。' },
+  dresser2: { title: 'タンス', text: '引き出しの奥に、家族の写真が伏せて置いてあった。' },
+};
+const VILLAGE_KITS = [
+  { items: [{ at: ['table', 0.45, -0.1], look: NOTE.mayor }, { at: ['dresser', -0.3, 1], look: LOOK_ITEM.ammo10 }, { at: ['bed', -1, 0.5], look: LOOK_TEXT.bed }] },
+  { items: [{ at: ['bed', -1, 0.5], look: NOTE.child }, { at: ['chest', 1, 0.9], look: LOOK_ITEM.herb }, { at: ['table', 0.5, -0.2] }] },
+  { items: [{ at: ['table', -0.45, 0.1], look: NOTE.team2 }, { at: ['dresser', 0.5, 1], look: LOOK_TEXT.dresser }, { at: ['shelf', 1, 0.6, Math.PI / 2] }] },
+  { items: [{ at: ['table', 0.5, 0.2], look: NOTE.doctor }, { at: ['chest', -1, 0.9], look: LOOK_ITEM.gold5 }, { at: ['bed', -1, -0.3] }] },
+  { items: [{ at: ['table', -0.45, 0.2], look: NOTE.ledger }, { at: ['bed', 1, 0.5], look: LOOK_TEXT.bed2 }, { at: ['shelf', 0, 1] }] },
+  { items: [{ at: ['chest', -1, 0.9], look: LOOK_ITEM.gren }, { at: ['table', 0.45, 0.1], look: LOOK_TEXT.table }, { at: ['dresser', 0.6, 1] }] },
+  { items: [{ at: ['hay', -1, 0.9], look: NOTE.last }, { at: ['hay', -0.45, 0.9] }, { at: ['chest', 1, 0.9], look: LOOK_ITEM.ammo15 }, { at: ['hay', 1, -0.1] }] },
+  { items: [{ at: ['table', 0.45, 0.1], look: NOTE.priest }, { at: ['dresser', -0.4, 1], look: LOOK_ITEM.herb }, { at: ['bed', -1, -0.2] }] },
+  { items: [{ at: ['table', -0.45, 0], look: LOOK_TEXT.table2 }, { at: ['chest', 1, 0.9], look: LOOK_ITEM.gold3 }, { at: ['shelf', 0.2, 1] }] },
+  { items: [{ at: ['bed', -1, 0.5], look: LOOK_TEXT.bed }, { at: ['dresser', 0.6, 1], look: LOOK_ITEM.ammo10 }] },
+  { items: [{ at: ['table', 0, 0.3], look: LOOK_TEXT.table3 }, { at: ['chest', 1, 0.9], look: LOOK_ITEM.herb }] },
+  { items: [{ at: ['dresser', 0, 1], look: LOOK_TEXT.dresser2 }, { at: ['table', -0.5, -0.1] }, { at: ['chest', 1, 0.9], look: LOOK_ITEM.red }] },
+];
 const VILLAGE_WAVES = [
-  { title: 'CHAPTER 1', sub: '黄昏の村', atmos: 'dusk', total: 9, conc: 4, mix: { fork: 0.55, sickle: 0.45 }, obj: '襲いかかる村人を撃退しろ' },
-  { title: 'CHAPTER 2', sub: '燃える家々', atmos: 'dusk2', total: 13, conc: 6, mix: { fork: 0.3, sickle: 0.3, axe: 0.25, torch: 0.15 }, obj: '斧を投げる村人に注意しろ' },
-  { title: 'CHAPTER 3', sub: '赤い霧の夜', atmos: 'night', total: 17, conc: 7, mix: { fork: 0.25, sickle: 0.25, axe: 0.2, torch: 0.15, brute: 0.15 }, obj: '頭を吹き飛ばしても安心するな', parasite: 0.4 },
-  { title: 'FINAL CHAPTER', sub: '処刑人', atmos: 'blood', total: 8, conc: 3, mix: { fork: 0.4, sickle: 0.4, axe: 0.2 }, obj: '教会から現れた処刑人を倒せ', boss: true, parasite: 0.3 },
+  // 1-1: search the houses for what happened (no attack until the ambush in a house; see updateSearch)
+  { title: 'MISSION 1-1', sub: '消えた村人たち', atmos: 'dusk', search: true, total: 0, conc: 0, mix: { fork: 0.55, sickle: 0.45 }, obj: '村の家を探索して、失踪の手掛かりを探せ' },
+  // 1-2: fight off the villagers (three chapters, as before)
+  { title: 'MISSION 1-2', sub: '黄昏の村', atmos: 'dusk', total: 9, conc: 4, mix: { fork: 0.55, sickle: 0.45 }, obj: '襲いかかる村人を撃退しろ' },
+  { title: 'MISSION 1-2', sub: '燃える家々', atmos: 'dusk2', total: 13, conc: 6, mix: { fork: 0.3, sickle: 0.3, axe: 0.25, torch: 0.15 }, obj: '斧を投げる村人に注意しろ' },
+  { title: 'MISSION 1-2', sub: '赤い霧の夜', atmos: 'night', total: 17, conc: 7, mix: { fork: 0.25, sickle: 0.25, axe: 0.2, torch: 0.15, brute: 0.15 }, obj: '頭を吹き飛ばしても安心するな', parasite: 0.4 },
+  // 1-3: the boss
+  { title: 'MISSION 1-3', sub: '処刑人', atmos: 'blood', total: 8, conc: 3, mix: { fork: 0.4, sickle: 0.4, axe: 0.2 }, obj: '教会から現れた処刑人を倒せ', boss: true, parasite: 0.3 },
 ];
 const TRADER_POS = new V3(13, 0, 2);
 const START_POS = new V3(0, 0, 9);
@@ -2103,6 +2233,7 @@ STAGES.lab = {
 let STAGE = STAGES.village;
 function clearWorld() {
   world.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  HOUSES.length = LOOKS.length = 0; houseLight.intensity = 0;
   while (world.children.length) world.remove(world.children[0]);
   solids.length = barrels.length = crates.length = fires.length = policeLights.length = lamps.length = 0;
   SURF.wall = SURF.ceil = null;
@@ -2297,14 +2428,16 @@ function keepInArena(e) {
   if (x === e.pos.x && z === e.pos.z) return false;
   e.pos.x = x; e.pos.z = z; return true;
 }
+// chapter number for enemy strength (STAGE 1's search mission is not a fighting chapter, so it does not count)
+const waveLv = () => Math.max(0, director.wave - (STAGE.waves[0]?.search ? 1 : 0));
 class Enemy {
   constructor(type, x, z, waveCfg) {
     this.type = type; this.t = ETYPES[type]; this.boss = !!this.t.boss;
-    const hpMul = 1 + (director.wave * 0.08);
+    const hpMul = 1 + (waveLv() * 0.08);
     this.hp = this.maxHp = this.t.hp * (this.boss ? 1 : hpMul);
     this.pos = new V3(x, 0, z); this.vel = new V3(); this.face = Math.atan2(player.pos.x - x, player.pos.z - z);
     this.state = this.boss ? 'intro' : 'chase'; this.st = 0; this.cd = rand(0.4, 1.4);
-    this.speed = this.t.speed * rand(0.9, 1.15) * (this.boss ? 1 : 1 + director.wave * 0.05);
+    this.speed = this.t.speed * rand(0.9, 1.15) * (this.boss ? 1 : 1 + waveLv() * 0.05);
     this.phase = rand(0, 6); this.voiceT = rand(1, 4); this.losT = 0; this.los = false; this.dead = false; this.removeT = 0;
     this.h = makeVillager(type); this.h.root.position.copy(this.pos); this.h.root.rotation.y = this.face; scene.add(this.h.root);
     this.hb = { head: new V3(), neck: new V3(), hips: new V3(), feet: new V3(), core: new V3() };
@@ -2399,7 +2532,7 @@ class Enemy {
           this.struck = true; sfx.swish();
           const range = (this.isParasite ? 2.7 : this.t.range) + 0.45;
           const facing = Math.cos(angDiff(this.face, toFace));
-          if (dist < range && facing > 0.4) hurtPlayer(this.isParasite ? 24 : this.t.dmg * (1 + director.wave * 0.05), this.pos, false, this);
+          if (dist < range && facing > 0.4) hurtPlayer(this.isParasite ? 24 : this.t.dmg * (1 + waveLv() * 0.05), this.pos, false, this);
         }
         if (this.st > 0.25) { this.struck = false; this.setState('recover'); }
         break;
@@ -2804,7 +2937,7 @@ const CROC_DEPTH = { lurk: -1.5, stalk: 0.2, float: 0.62 };
 class Croc {
   constructor(x, z) {
     this.type = 'croc'; this.t = ETYPES.croc; this.boss = false; this.croc = true;
-    this.hp = this.maxHp = this.t.hp * (1 + director.wave * 0.08);
+    this.hp = this.maxHp = this.t.hp * (1 + waveLv() * 0.08);
     this.pos = new V3(x, 0, z); this.vel = new V3(); this.face = Math.atan2(player.pos.x - x, player.pos.z - z);
     this.state = 'lurk'; this.st = 0; this.cd = rand(2, 4); this.speed = this.t.speed;
     this.dead = false; this.removeT = 0; this.scale = 1; this.radius = 0.55; this.isParasite = false; this.parasiteChance = 0; this.stagger = 0;
@@ -2952,7 +3085,10 @@ function startWave(i, fromContinue) {
   setH('obj', w.obj);
   director.proT = 0; director.goShown = false; director.ambushShown = false; director.dim = !!w.dim; marker.visible = false; setFade(false);
   if (!fromContinue) snapshot = { inv: JSON.parse(JSON.stringify(inv)), hp: player.hp, maxHp: player.maxHp };
-  trader.hide(); setAtmos(w.atmos); showBanner(w.title, w.sub); setMusic(w.boss ? 'none' : 'combat');
+  trader.hide(); setAtmos(w.atmos); showBanner(w.title, w.sub); setMusic(w.boss || w.search ? 'none' : 'combat');
+  if (w.search && fromContinue && (search.step === 'ambush' || search.step === 'exit')) { // died in the ambush: back in that house, the villagers come again
+    const H = search.house; player.pos.set(H.x, 0, H.z); search.step = 'ambush'; search.left = AMBUSH.total; search.spawnT = 2;
+  }
   $('chap').textContent = `${w.title} ― ${w.sub}`; $('tNext').classList.add('hidden');
   if (w.boss) { $('bossName').textContent = STAGE.bossName; if (STAGE.id === 'village') setTimeout(() => sfx.bell(), 400); else sfx.roar(new V3(0, 0, -30)); }
   rain.visible = !!w.rain;
@@ -2970,6 +3106,8 @@ function updateDirector(dt) {
         $('bossBar').classList.remove('hidden');
       }
     }
+  } else if (director.phase === 'combat' && w.search) {
+    updateSearch(w, dt, alive);
   } else if (director.phase === 'combat' && w.prologue) {
     director.proT += dt; const goal = w.goal || STAGE.goal;
     if (director.spawned < w.total && alive < w.conc) { director.spawnT -= dt; if (director.spawnT <= 0) { spawnEnemy(pickType(w.mix)); director.spawned++; director.spawnT = w.explore ? rand(2, 4.5) : rand(0.2, 0.6); } }
@@ -3004,7 +3142,7 @@ function updateDirector(dt) {
     if (cleared) {
       if (w.boss) { director.phase = 'ending'; marker.visible = false; director.introT = 4; $('bossBar').classList.add('hidden'); setMusic('rest'); showBanner(STAGE.bossBanner, '撃破'); }
       else {
-        director.phase = 'rest'; const bonus = 800 + director.wave * 600; inv.gold += bonus;
+        director.phase = 'rest'; const bonus = 800 + waveLv() * 600; inv.gold += bonus;
         showBanner('CHAPTER CLEAR', `報酬 ${bonus.toLocaleString()} G`); sfx.cash();
         if (w.traderAt) TRADER_POS.set(w.traderAt[0], 0, w.traderAt[1]);
         trader.show(); setMusic('rest');
@@ -3017,6 +3155,55 @@ function updateDirector(dt) {
   }
 }
 function setFade(on) { $('fade').classList.toggle('on', on); }
+// ---- STAGE 1-1: search the houses. After enough letters, villagers break into the house (movie), then outside (movie), then 1-2 ----
+const search = { found: new Set(), need: 3, step: 'explore', house: null, left: 0, spawnT: 0 };
+const AMBUSH = { total: 5, inMovie: 2 }; // villagers in the house ambush: 2 walk in during the movie, the rest follow through the door
+function resetSearch() { search.found.clear(); search.step = 'explore'; search.house = null; search.left = 0; search.spawnT = 0; }
+function spawnAt(type, x, z) {
+  const e = new Enemy(type, x, z, STAGE.waves[director.wave]); e.home = new V3(x, 0, z); e.zone = zoneOf(x, z); e.always = true; enemies.push(e); return e;
+}
+function resumePlay() { $('hud').classList.remove('hidden'); if (isTouch) $('touch').classList.remove('hidden'); game.state = 'play'; last = performance.now(); }
+function updateSearch(w, dt, alive) {
+  const H = houseAt(player.pos.x, player.pos.z);
+  if (search.step === 'explore') {
+    setH('obj', `${w.obj}　手掛かり ${search.found.size}/${search.need}`);
+    if (search.found.size >= search.need && H && !player.dead) {
+      search.step = 'ambush'; search.house = H; search.left = AMBUSH.total - AMBUSH.inMovie; search.spawnT = 2.5;
+      playMovie('ambush', () => { resumePlay(); setMusic('combat'); });
+    }
+  } else if (search.step === 'ambush') {
+    const Hs = search.house;
+    if (search.left > 0 && alive < 3) { search.spawnT -= dt; if (search.spawnT <= 0) {
+      const side = rand(-1.5, 1.5), d = rand(4, 6); spawnAt(pick(['fork', 'sickle', 'fork', 'axe']), Hs.door.x + Hs.out.x * d - Hs.out.z * side, Hs.door.z + Hs.out.z * d + Hs.out.x * side);
+      search.left--; search.spawnT = rand(1.5, 3); } }
+    const now = enemies.filter(e => e.alive && !e.boss).length; // counted again: one may have just come in this frame
+    setH('obj', `家に入ってきた村人を撃退しろ　残り ${search.left + now}`);
+    if (search.left === 0 && now === 0) {
+      search.step = 'exit'; marker.position.copy(Hs.door).addScaledVector(Hs.out, 1.4); marker.visible = true; showBanner('', '家の外に出ろ'); setMusic('none');
+    }
+  } else if (search.step === 'exit') {
+    setH('obj', '家の外に出ろ');
+    if (!H && !player.dead) { search.step = 'done'; marker.visible = false; playMovie('outbreak', () => { resumePlay(); startWave(director.wave + 1); }); }
+  }
+}
+// ---- things to examine (E / the touch button) ----
+function nearestLook() {
+  if (!LOOKS.length || player.dead || player.grabbedBy) return null; const H = houseAt(player.pos.x, player.pos.z); if (!H) return null;
+  let best = null, bd = 1.8; for (const L of LOOKS) { if (L.house !== H.idx) continue; const d = Math.hypot(L.pos.x - player.pos.x, L.pos.z - player.pos.z); if (d < bd) { bd = d; best = L; } }
+  return best;
+}
+function openLook(L) {
+  game.state = 'read'; input.aim = input.fire = false; for (const k in keys) keys[k] = false;
+  let text = L.text;
+  if (L.item) {
+    if (L.taken) text = 'もう何も残っていない。';
+    else { L.taken = true; const it = L.item; if (it.ammo) inv.ammo.hg += it.ammo; if (it.herbG) inv.herbG += it.herbG; if (it.herbR) inv.herbR += it.herbR; if (it.gold) inv.gold += it.gold; if (it.gren) inv.gren += it.gren; sfx.pickup(); }
+  } else sfx.click();
+  if (L.clue && !search.found.has(L.id)) { search.found.add(L.id); text += `\n\n<span class="clue">手掛かりを手に入れた（${search.found.size}）</span>`; }
+  L.read = true; if (L.mark) L.mark.visible = false;
+  setH('readTitle', L.title); setH('readText', text.replace(/\n/g, '<br>')); $('read').classList.toggle('letter', !!L.clue); $('read').classList.remove('hidden');
+}
+function closeLook() { $('read').classList.add('hidden'); resumeGame(); }
 function clearActors() {
   for (const e of enemies) scene.remove(e.h.root); enemies.length = 0;
   for (const p of projectiles) scene.remove(p.mesh); projectiles.length = 0;
@@ -3218,6 +3405,7 @@ addEventListener('keydown', e => {
   if (e.code === 'Tab') e.preventDefault();
   if (game.state === 'case') { if (e.code === 'Tab' || e.code === 'Escape') closeCase(); return; }
   if (game.state === 'shop') { if (e.code === 'KeyE' || e.code === 'Escape') closeShop(); return; }
+  if (game.state === 'read') { if (['KeyE', 'Escape', 'Enter', 'Space'].includes(e.code)) closeLook(); return; }
   if (game.state === 'cine') { if (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape') endMovie(); return; }
   if (game.state !== 'play') return;
   if (keys[e.code]) return; keys[e.code] = true;
@@ -3261,7 +3449,8 @@ document.addEventListener('pointerlockchange', () => {
 
 function quickTurn() { if (player.state !== 'normal' || player.aiming || player.grabbedBy) return; player.turnT = 0.28; player.turnFrom = player.yaw; }
 function interact() {
-  if (trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2) openShop();
+  if (trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2) { openShop(); return; }
+  const L = nearestLook(); if (L) openLook(L);
 }
 function spacePressed() {
   if (player.grabbedBy) { player.mash++; shake(0.06, 0.1); return; }
@@ -3295,7 +3484,7 @@ if (isTouch) {
   btn('tAim', b => { input.aim = !input.aim; b.classList.toggle('on', input.aim); });
   btn('tFire', () => { input.fire = true; if (!input.aim) doKnife(); }, () => { input.fire = false; });
   btn('tAct', () => { if (player.grabbedBy || qte.dodgeOpen) spacePressed(); else doGuard(); });
-  btn('tTrade', () => interact());
+  btn('tTrade', () => interact()); btn('tLook', () => interact()); btn('tMenu', () => pauseGame());
   btn('tReload', () => startReload()); btn('tKnife', () => doKnife()); btn('tHeal', () => heal());
   btn('tWeap', () => cycleWeapon(1)); btn('tGren', () => throwGrenade()); btn('tTurn', () => quickTurn());
   btn('tCase', () => openCase()); btn('tNext', () => nextWave());
@@ -3396,9 +3585,12 @@ function updateHUD(dt) {
   let pr = '';
   const nearTrader = !player.dead && !player.grabbedBy && trader.visible && player.pos.distanceTo(TRADER_POS) < 3.2;
   if (isTouch && nearTrader !== ui.trade) { ui.trade = nearTrader; $('tTrade').classList.toggle('hidden', !nearTrader); }
+  const look = !nearTrader && game.state === 'play' ? nearestLook() : null;
+  if (isTouch && !!look !== ui.look) { ui.look = !!look; $('tLook').classList.toggle('hidden', !look); }
   if (!player.dead && !player.grabbedBy) {
     if (player.state === 'normal' && player.guardCD <= 0 && enemies.some(e => e.alive && (e.state === 'windup' || e.state === 'grabWind' || e.state === 'swingWind' || e.state === 'biteWind') && e.pos.distanceTo(player.pos) < (e.boss ? 5 : 3))) pr = `<kbd>${isTouch ? 'ガード' : 'F'}</kbd>ガード！`;
     else if (nearTrader) pr = isTouch ? '' : `<kbd>E</kbd>商人と取引`;
+    else if (look) pr = isTouch ? '' : `<kbd>E</kbd>調べる（${look.name}）`;
     else if (inv.mag[id] === 0 && inv.ammo[id] > 0 && player.reloadT <= 0) pr = `<kbd>R</kbd>リロード`;
   }
   if (pr !== ui.prompt) { ui.prompt = pr; $('prompt').innerHTML = pr; $('prompt').classList.toggle('hidden', !pr); }
@@ -3516,6 +3708,23 @@ function resumeGame() {
   last = performance.now();
 }
 $('resumeBtn').onclick = resumeGame;
+// pause menu: controls and going back to the title
+const CONTROLS = {
+  pc: [['WASD', '移動'], ['Shift', '走る'], ['マウス', '視点'], ['右クリック（長押し）', '構える'], ['左クリック', '撃つ（構えていなければナイフ）'], ['F', 'ガード（タイミングよく）'], ['R', 'リロード'],
+    ['1・2・3 / ホイール', '武器の切り替え'], ['H', '回復'], ['G', '手榴弾'], ['Q', 'クイックターン'], ['E', '調べる / 商人と取引'], ['Tab', 'アタッシュケース'], ['SPACE', '掴まれたときの連打 / 回避'], ['Enter', '次の章へ（休憩中）'], ['Esc', 'このメニュー']],
+  touch: [['左スティック', '移動（大きく倒すと走る）'], ['右側をドラッグ', '視点'], ['構え', '構える（切り替え）'], ['撃つ', '撃つ（構えていなければナイフ）'], ['ガード', 'ガード / 連打 / 回避'], ['R', 'リロード'], ['武器', '武器の切り替え'],
+    ['回復', '回復'], ['手榴', '手榴弾'], ['180°', 'クイックターン'], ['調べる / 商人と取引', '近くにいるときに画面中央に出る'], ['ケース', 'アタッシュケース'], ['次の章へ', '休憩中に次の章へ'], ['メニュー', 'このメニュー']],
+};
+$('ctrlList').innerHTML = CONTROLS[isTouch ? 'touch' : 'pc'].map(([k, v]) => `<div><b>${k}</b><span>${v}</span></div>`).join('');
+if (isTouch) $('sensLabel').textContent = '視点の感度';
+function goHome() {
+  clearActors(); marker.visible = false; setFade(false); setMusic('none'); document.exitPointerLock?.();
+  ['pause', 'hud', 'touch', 'dead', 'win', 'read', 'shop', 'case'].forEach(k => $(k)?.classList.add('hidden'));
+  $('title').classList.remove('hidden'); game.state = 'title';
+}
+$('homeBtn').onclick = e => { e.stopPropagation(); goHome(); };
+$('readClose').onclick = e => { e.stopPropagation(); closeLook(); };
+$('read').addEventListener('click', e => { if (e.target.id === 'read') closeLook(); });
 $('sens').oninput = e => { sens = +e.target.value; };
 $('pause').addEventListener('click', e => { if (e.target.id === 'pause') resumeGame(); });
 
@@ -3530,7 +3739,7 @@ function startGame(stageId = STAGE.id) {
   initAudio();
   inv = newInventory(); Object.assign(stats, { kills: 0, headKills: 0, shots: 0, hits: 0, heads: 0, time: 0, deaths: 0, dodges: 0 });
   player.hp = player.maxHp = 100; player.weapon = 'hg'; for (const k in guns) guns[k].visible = k === 'hg';
-  buildStage(stageId); const ts = STAGE.testStart; director.wave = ts ? ts.wave : 0; resetWorldForWave();
+  resetSearch(); buildStage(stageId); const ts = STAGE.testStart; director.wave = ts ? ts.wave : 0; resetWorldForWave();
   ['title', 'dead', 'win'].forEach(id => $(id).classList.add('hidden'));
   $('hud').classList.remove('hidden'); if (isTouch) $('touch').classList.remove('hidden');
   game.state = 'play'; if (!isTouch) canvas.requestPointerLock?.();
@@ -4167,6 +4376,86 @@ const MOVIES = {
   },
 };
 
+// ---- STAGE 1-1 movies, played in the game world itself (world: true): the house ambush, and the villagers outside ----
+// keep a point inside the house's walls (so cameras placed near Carver never end up in or behind a wall)
+function inHouse(H, v, m = 0.45) { v.x = clamp(v.x, H.x - H.w / 2 + 0.3 + m, H.x + H.w / 2 - 0.3 - m); v.z = clamp(v.z, H.z - H.d / 2 + 0.3 + m, H.z + H.d / 2 - 0.3 - m); return v; }
+const angTo = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
+MOVIES.ambush = {
+  world: true, dur: 9.5,
+  subs: [[0.3, 3.2, '', '外から音がする…']], // narration
+  fade: t => 1 - seg(t, 0, 0.4),
+  events: [[0.6, () => sfx.groan(cine.amb.D, 0.9)], [2.4, () => sfx.wood(cine.amb.D)], [3.9, () => sfx.voice(cine.amb.D)], [5.2, () => sfx.groan(cine.amb.D)]],
+  setup() {
+    const H = search.house, P = player.pos.clone(), D = H.door.clone(), C = new V3(H.x, 0, H.z);
+    const face0 = ph.root.rotation.y, faceDoor = angTo(P, D);
+    const Z = [0, 1].map(i => { const e = spawnAt(i ? 'sickle' : 'fork', D.x + H.out.x * 3, D.z + H.out.z * 3); e.alerted = true; return e; });
+    cine.amb = { H, P, D, C, face0, faceDoor, Z };
+  },
+  render(t) {
+    const { H, P, D, C, face0, faceDoor, Z } = cine.amb, out = H.out, side = _v.set(-out.z, 0, out.x);
+    // Carver: stands still, turns his head toward the door at the noise, then turns to face it and raises his gun
+    const turn = easeIO(seg(t, 6.8, 7.7)), face = lerp(face0, face0 + angDiff(face0, faceDoor), turn), p = {};
+    const look = easeIO(seg(t, 1.2, 2.2)) * (1 - turn); p.hy = clamp(angDiff(face0, faceDoor), -1.1, 1.1) * 0.8 * look; p.ty = p.hy * 0.3;
+    const aim = easeIO(seg(t, 7.5, 8.4)); Object.assign(p, { rsx: -1.45 * aim, rex: -0.15 * aim, lsx: -1.3 * aim, lsz: 0.35 * aim, lex: -0.5 * aim });
+    ph.root.position.copy(P); ph.root.rotation.set(0, face, 0); setPose(ph, p); ph.root.updateMatrixWorld(true);
+    // two villagers come in through the doorway, one after the other
+    Z.forEach((e, i) => {
+      const t0 = 3.6 + i * 0.9, u = seg(t, t0, t0 + 3.4), a = _a.copy(D).addScaledVector(out, 3).addScaledVector(side, i ? 0.6 : -0.4);
+      const b = _b.copy(D).addScaledVector(out, -(1.4 + i * 0.9)).addScaledVector(side, i ? 0.7 : -0.5); inHouse(H, b);
+      e.pos.copy(a).lerp(b, u); e.face = u > 0.98 ? angTo(e.pos, P) : angTo(a, b); e.h.root.position.copy(e.pos); e.h.root.rotation.y = e.face;
+      const q = u > 0 && u < 1 ? walkPose({}, t * 5.2 + i, 0.85) : {}; q.lsx = (q.lsx || 0) - 0.9 * u; q.rsx = (q.rsx || 0) - 0.7 * u; q.tx = 0.12; q.hy = 0;
+      setPose(e.h, q); e.updateHB();
+    });
+    // cameras
+    const hp = ph.head.getWorldPosition(_p), toC = _q.subVectors(C, P).setY(0); if (toC.lengthSq() < 0.5) toC.copy(out).negate(); toC.normalize();
+    if (t < 3.4) { // A: close on Carver, from the room's side
+      const c = inHouse(H, _w.copy(P).addScaledVector(toC, 1.5).addScaledVector(_lk.set(-toC.z, 0, toC.x), 0.4)); cineCam.position.set(c.x, 1.55, c.z); cineCam.lookAt(hp.x, hp.y - 0.05, hp.z); cine.fov = 44;
+    } else { // B, C: behind his shoulder, toward the doorway
+      const dD = _q.subVectors(D, P).setY(0).normalize(), k = seg(t, 6.8, 8.4);
+      const c = inHouse(H, _w.copy(P).addScaledVector(dD, -lerp(1.0, 1.9, k)).addScaledVector(_lk.set(-dD.z, 0, dD.x), 0.45), 0.25);
+      cineCam.position.set(c.x, lerp(1.75, 1.65, k), c.z); cineCam.lookAt(D.x, 1.3, D.z); cine.fov = lerp(55, 62, k);
+    }
+  },
+  cleanup() {
+    const { faceDoor } = cine.amb; player.yaw = faceDoor + Math.PI; player.modelYaw = faceDoor; player.pitch = -0.08; ph.root.rotation.y = faceDoor;
+    for (const e of cine.amb.Z) { e.setState('chase'); e.alerted = true; }
+  },
+};
+MOVIES.outbreak = {
+  world: true, dur: 13,
+  subs: [[8.8, 12.3, '', '一体何が起きているんだ…？']],
+  fade: t => Math.max(1 - seg(t, 0, 0.7), seg(t, 12.3, 13)),
+  events: [[1.0, () => sfx.groan(new V3(0, 0, 0), 0.8)], [4.0, () => sfx.groan(new V3(4, 0, 2))], [6.2, () => sfx.voice(new V3(-3, 0, 3))]],
+  setup() {
+    const P = player.pos.clone(), base = Math.atan2(P.z, P.x);
+    const W = Array.from({ length: 10 }, (_, i) => { const h = makeVillager(['fork', 'sickle', 'axe', 'fork', 'brute', 'sickle', 'fork', 'axe', 'sickle', 'fork'][i]); scene.add(h.root); return { h, r: 4.5 + (i % 5) * 1.9, a0: i * 0.63 + 0.3, dir: i % 2 ? 1 : -1 }; });
+    cine.ob = { P, base, W, face: angTo(P, new V3(0, 0, 0)) };
+  },
+  render(t) {
+    const { P, base, W, face } = cine.ob;
+    // villagers shamble around the plaza, slowly, heads down
+    W.forEach((w, i) => {
+      const a = w.a0 + w.dir * t * 0.62 / w.r, x = Math.cos(a) * w.r, z = Math.sin(a) * w.r;
+      w.h.root.position.set(x, 0, z); w.h.root.rotation.y = Math.atan2(-Math.sin(a) * w.dir, Math.cos(a) * w.dir);
+      const q = walkPose({}, t * 3.6 + i * 1.7, 0.6); q.tx = 0.18; q.hx = 0.25 + Math.sin(t * 1.3 + i) * 0.08; q.hy = Math.sin(t * 0.7 + i * 2) * 0.3; q.lsx = (q.lsx || 0) * 0.4 - 0.15; q.rsx = (q.rsx || 0) * 0.4 - 0.15;
+      setPose(w.h, q);
+    });
+    // Carver at the door: freezes, draws back half a step, his arms tense
+    const tense = easeIO(seg(t, 8.4, 9.2)), back = tense * 0.25, fx = Math.sin(face), fz = Math.cos(face);
+    ph.root.position.set(P.x - fx * back, 0, P.z - fz * back); ph.root.rotation.set(0, face, 0);
+    setPose(ph, { tx: -0.08 * tense, hx: -0.08 * tense + Math.sin(t * 9) * 0.01 * tense, rsx: -0.55 * tense, rex: -0.5 * tense, lsx: -0.35 * tense, lex: -0.6 * tense, lsz: 0.12 * tense, rsz: -0.08 * tense });
+    ph.root.updateMatrixWorld(true);
+    if (t < 4.6) { // A: high over the plaza, drifting
+      const a = base + 0.35 - t * 0.05; cineCam.position.set(Math.cos(a) * 14, 9.5 - t * 0.5, Math.sin(a) * 14); cineCam.lookAt(0, 0.8, 0); cine.fov = 56;
+    } else if (t < 8.2) { // B: low, the villagers walk past
+      const a = base - 0.5 + (t - 4.6) * 0.04; cineCam.position.set(Math.cos(a) * 11.5, 1.15, Math.sin(a) * 11.5); cineCam.lookAt(Math.cos(a + 0.4) * 4, 1.3, Math.sin(a + 0.4) * 4); cine.fov = 52;
+    } else { // C: Carver, his face (no expression to show: the body says it)
+      const hp = ph.head.getWorldPosition(_p), k = seg(t, 8.2, 13), dd = lerp(2.3, 1.9, k); cineCam.position.set(hp.x + fx * dd + fz * 0.5, hp.y - 0.1, hp.z + fz * dd - fx * 0.5); cineCam.lookAt(hp.x, hp.y - 0.25, hp.z); cine.fov = 46;
+    }
+  },
+  cleanup() { for (const w of cine.ob.W) scene.remove(w.h.root); const { face } = cine.ob; player.yaw = face + Math.PI; player.modelYaw = face; ph.root.rotation.y = face; },
+};
+
 // ---- player ----
 let cineHeli = null;
 function heliSound(mode) {
@@ -4198,7 +4487,7 @@ function heliLevel(L) {
 }
 function playMovie(id, onEnd) {
   buildCine(); initAudio();
-  cine.movie = MOVIES[id]; cine.t = 0; cine.onEnd = onEnd; cine.sound = null; cine.sub = -1;
+  cine.movie = MOVIES[id]; cine.t = 0; cine.onEnd = onEnd; cine.sound = null; cine.sub = -1; cine.movie.setup?.();
   ['title', 'hud', 'touch', 'win', 'dead'].forEach(k => $(k)?.classList.add('hidden'));
   $('cine').classList.remove('hidden'); setH('cineWho', ''); setH('cineLine', '');
   game.state = 'cine'; setMusic('none'); laser.visible = laserDot.visible = false;
@@ -4207,11 +4496,11 @@ function playMovie(id, onEnd) {
 function renderCine(t) {
   const M = cine.movie; M.render(t);
   cineCam.aspect = viewW / viewH; cineCam.fov = Math.min(90, (cine.fov || 50) * fovMul); cineCam.updateProjectionMatrix();
-  renderer.toneMappingExposure = 1.15;
+  if (!M.world) renderer.toneMappingExposure = 1.15;
   $('cineFade').style.opacity = clamp(M.fade(t), 0, 1).toFixed(3);
   const i = M.subs.findIndex(s => t >= s[0] && t < s[1]);
   if (i !== cine.sub) { cine.sub = i; setH('cineWho', i < 0 ? '' : M.subs[i][2]); setH('cineLine', i < 0 ? '' : M.subs[i][3]); }
-  const snd = M.sound(t); if (snd !== cine.sound) { cine.sound = snd; heliSound(snd); }
+  const snd = M.sound ? M.sound(t) : null; if (snd !== cine.sound) { cine.sound = snd; if (snd) heliSound(snd); }
   if (M.level) heliLevel(M.level(t));
 }
 function updateCine(dt) {
@@ -4222,7 +4511,8 @@ function updateCine(dt) {
 }
 function endMovie() {
   if (game.state !== 'cine') return;
-  heliSound('off'); cine.sound = null;
+  if (cineHeli) heliSound('off'); cine.sound = null;
+  const M = cine.movie; if (M.world) { M.render(M.dur - 0.001); M.cleanup?.(); }
   $('cine').classList.add('hidden'); game.state = 'title';
   const f = cine.onEnd; cine.onEnd = null; if (f) f();
 }
@@ -4234,7 +4524,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   tick(dt);
   const title = game.state === 'title', cin = game.state === 'cine';
-  renderer.setRenderTarget(psxRT); renderer.render(cin ? cineScene : title ? titleScene : scene, cin ? cineCam : title ? titleCam : camera);
+  renderer.setRenderTarget(psxRT); renderer.render(cin ? (cine.movie.world ? scene : cineScene) : title ? titleScene : scene, cin ? cineCam : title ? titleCam : camera);
   renderer.setRenderTarget(null); renderer.render(postScene, postCam);
 }
 function tick(dt) {
@@ -4267,6 +4557,11 @@ function tick(dt) {
     else if (l.mode === 'pulse') k = 0.25 + 0.75 * Math.max(0, Math.sin(l.t * 3));
     k *= dimK; if (l.light) l.light.intensity = l.base * k; l.mesh.material.emissiveIntensity = 1.2 * k;
   }
+  if (LOOKS.length) {
+    const tt = performance.now() / 1000; markM.opacity = 0.6 + Math.sin(tt * 4) * 0.3;
+    for (const L of LOOKS) if (L.mark && L.mark.visible) { L.mark.rotation.y = tt * 2; L.mark.position.y = L.pos.y + 0.32 + Math.sin(tt * 2.5) * 0.04; }
+    const H = houseAt(player.pos.x, player.pos.z); houseLight.intensity = H ? 3.2 : 0; if (H) houseLight.position.set(H.x, H.h - 0.8, H.z);
+  }
   if (marker.visible) { marker.children[0].material.opacity = 0.14 + Math.sin(performance.now() / 200) * 0.06; marker.rotation.y += dt; }
   for (const pl of policeLights) {
     pl.t += dt; const red = (pl.t * 2.5) % 1 < 0.5;
@@ -4293,4 +4588,4 @@ buildStage('village');
 requestAnimationFrame(frame);
 
 // debug handle for automated testing
-window.__game = { cine, cineCam, CUT5, CUT6, FLINCH, playMovie, renderCine, playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };
+window.__game = { cine, cineCam, CUT5, CUT6, FLINCH, search, HOUSES, LOOKS, houseAt, goHome, playMovie, renderCine, playerRoot: ph.root, get traderRoot() { return trader.h.root; }, get stage() { return STAGE; }, NAV, TRADER_POS, buildStage, startWave, sim(sec, dt = 1 / 30) { for (let t = 0; t < sec; t += dt) tick(dt); }, input, camera, scene, solids, player, enemies, director, game, startGame, spawnEnemy, stats, get inv() { return inv; } };

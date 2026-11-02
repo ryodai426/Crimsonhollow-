@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const SP = process.argv[2], tag = process.argv[3] || 'v';
-  const cases = [['village', 0], ['village', 2], ['village', 3], ['city', 0], ['city', 2], ['stationIn', 0], ['stationIn', 1], ['stationIn', 2]];
+  const cases = [['village', 1], ['village', 3], ['village', 4], ['city', 0], ['city', 2], ['stationIn', 0], ['stationIn', 1], ['stationIn', 2]];
   const p = await b.newPage({ viewport: { width: 960, height: 720 } });
   const errs = []; p.on('pageerror', e => errs.push('PAGEERR: ' + e.message));
   await p.goto('http://localhost:8766/?' + Date.now()); await p.waitForTimeout(1500);

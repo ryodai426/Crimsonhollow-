@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
   const out = await p.evaluate(() => {
     const g = window.__game, P = g.player; const log=[]; const seen=new Set();
     g.inv.owned.sg = true; g.inv.ammo.sg = 999; g.inv.ammo.hg = 999; g.inv.mag.sg = 6;
-    g.startWave(3);
+    g.startWave(g.stage.waves.findIndex(w => w.boss));
     for (let i=0;i<4000;i++) {
       P.hp = 100; if (P.dead) { P.dead=false; P.state='normal'; }
       const boss = g.director.boss;

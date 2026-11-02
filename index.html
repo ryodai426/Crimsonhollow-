@@ -132,6 +132,29 @@ body.touch #controls{display:none}
 #winStats{margin-top:calc(var(--k)*14px);font-size:calc(var(--k)*19px);line-height:1.8}
 #rank{font-family:"Cinzel",serif;font-size:calc(var(--k)*80px);color:var(--red2);text-shadow:0 0 20px #600;line-height:1.1;-webkit-text-stroke:0}
 #sensLabel{margin-top:14px;font-size:calc(var(--k)*16px);color:var(--dim)}
+/* pause menu: settings, controls, back to the title */
+#pause{overflow:auto;justify-content:flex-start;padding-top:calc(var(--k)*20px)}
+#pause .btn{margin-top:calc(var(--k)*12px)}
+#ctrlHead{margin-top:calc(var(--k)*16px);font-size:calc(var(--k)*16px);color:var(--gold);letter-spacing:.2em}
+#ctrlList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px calc(var(--k)*18px);margin-top:6px;font-size:calc(var(--k)*14px);text-align:left;max-width:min(640px,100%)}
+#ctrlList div{display:flex;gap:10px;border-bottom:1px solid rgba(200,170,120,.15);padding:2px 0}
+#ctrlList b{color:var(--gold);font-weight:400;min-width:7.5em;flex-shrink:0}
+body.touch.portrait #ctrlList{grid-template-columns:1fr;font-size:13px}
+body.touch #ctrlList{font-size:13px}
+#homeBtn{border-color:#7a2a20}
+/* reading a letter / examining something */
+#read{background:rgba(0,0,0,.72)}
+#readBox{pointer-events:auto;width:min(560px,92%);max-height:88%;overflow:auto;background:linear-gradient(#1b1411,#0e0a09);border:2px solid var(--line);padding:calc(var(--k)*16px) calc(var(--k)*20px);text-align:left;box-shadow:0 0 50px #000}
+#read.letter #readBox{background:#d9cfb4;color:#2a2018;border-color:#6a5030;-webkit-text-stroke:0;text-shadow:none}
+#readTitle{font-size:calc(var(--k)*20px);color:var(--gold);letter-spacing:.1em;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:10px}
+#read.letter #readTitle{color:#5a1a10;border-color:#8a7050}
+#readText{font-size:calc(var(--k)*17px);line-height:1.8}
+#readText .clue{color:var(--gold);font-size:.9em}
+#read.letter #readText .clue{color:#8a1a10}
+#readBox .btn{display:block;margin:calc(var(--k)*14px) auto 0}
+#tLook{left:50%;top:54%;transform:translateX(-50%);width:auto;height:auto;padding:12px 22px;border-radius:4px;border-color:var(--gold);color:var(--gold);background:rgba(20,14,6,.75);font-size:17px;white-space:nowrap}
+body.touch.portrait #tLook{top:48%}
+body.touch.landscape #tLook{width:auto!important;height:auto!important}
 
 /* ---------- case & shop ---------- */
 .panelScreen{background:rgba(0,0,0,.8)}
@@ -198,6 +221,9 @@ body.touch.portrait #tCase{left:22px!important}
 body.touch.landscape #topLeft{max-width:36%}
 body.touch.landscape #topLeft{left:calc(84px + env(safe-area-inset-left,0px))}
 #tCase{font-size:13px}
+#tMenu{font-size:11px;white-space:nowrap;padding:0;letter-spacing:-.04em}
+body.touch.portrait #tMenu{top:auto!important;left:84px!important;bottom:calc(176px + env(safe-area-inset-bottom,0px))}
+body.touch.landscape #tMenu{left:22px!important;top:88px!important}
 #tTrade{left:50%;top:54%;transform:translateX(-50%);width:auto;height:auto;padding:12px 22px;border-radius:4px;border-color:var(--gold);color:var(--gold);background:rgba(20,14,6,.75);font-size:17px;white-space:nowrap}
 body.touch.landscape #tNext,body.touch.landscape #tTrade{width:auto!important;height:auto!important}
 body.touch.portrait #tTrade{top:48%}
@@ -264,7 +290,7 @@ body.touch.landscape #tNext{width:auto!important;height:auto!important}
     出迎えた村人たちの瞳は、赤く濁っていた――。
   </div>
   <div id="stageSel">
-    <button class="stage" data-stage="village"><b>STAGE 1</b><span>赤霧の村</span><small>霧に閉ざされた山あいの村。寄生された村人と、教会に潜む処刑人。</small></button>
+    <button class="stage" data-stage="village"><b>STAGE 1</b><span>赤霧の村</span><small>霧に閉ざされた山あいの村。家々を調べて失踪の手掛かりを探せ。寄生された村人と、教会に潜む処刑人。</small></button>
     <button class="stage" data-stage="city"><b>STAGE 2 <em>TEST</em></b><span>街・警察署</span><small>村から戻ると、街はゾンビであふれていた。襲撃を耐え抜き、警察署へ。（TEST：警察署に逃げ込む直前から）</small></button>
     <button class="stage" data-stage="sewer"><b>STAGE 3 <em>TEST</em></b><span>地下鉄</span><small>迷路のような下水道を抜け、壊れた地下鉄の廃駅から線路を伝って車両庫へ。水の中のワニに注意。</small></button>
     <button class="stage" data-stage="lab"><b>STAGE 4 <em>TEST</em></b><span>地下研究所</span><small>車両倉庫の隠し扉の先。パンデミックの発生源で、元凶と対峙する。</small></button>
@@ -272,7 +298,7 @@ body.touch.landscape #tNext{width:auto!important;height:auto!important}
   <div id="controls">
     <span><b>WASD</b> 移動 / <b>Shift</b> 走る</span><span><b>マウス</b> 視点</span><span><b>右クリック</b> 構える</span>
     <span><b>左クリック</b> 撃つ / ナイフ</span><span><b>F</b> ガード（タイミングよく）</span><span><b>R</b> リロード / <b>1-3</b> 武器</span>
-    <span><b>H</b> 回復 / <b>G</b> 手榴弾</span><span><b>Q</b> クイックターン</span><span><b>E</b> 商人 / <b>Tab</b> ケース</span>
+    <span><b>H</b> 回復 / <b>G</b> 手榴弾</span><span><b>Q</b> クイックターン</span><span><b>E</b> 調べる・商人 / <b>Tab</b> ケース</span><span><b>Esc</b> メニュー</span>
     <span><b>SPACE</b> 連打・回避</span>
   </div>
 </div>
@@ -282,6 +308,13 @@ body.touch.landscape #tNext{width:auto!important;height:auto!important}
   <button class="btn" id="resumeBtn">再開する</button>
   <div id="sensLabel">マウス感度</div>
   <input id="sens" type="range" min="0.4" max="2.4" step="0.1" value="1" style="width:220px;pointer-events:auto">
+  <div id="ctrlHead">操作設定</div>
+  <div id="ctrlList"></div>
+  <button class="btn" id="homeBtn">ホームに戻る</button>
+</div>
+
+<div id="read" class="screen hidden">
+  <div id="readBox"><div id="readTitle"></div><div id="readText"></div><button class="btn" id="readClose">閉じる</button></div>
 </div>
 
 <div id="dead" class="screen hidden">
@@ -338,6 +371,8 @@ body.touch.landscape #tNext{width:auto!important;height:auto!important}
   <button class="tbtn" id="tTurn" style="right:178px;bottom:110px;width:52px;height:52px">180°</button>
   <button class="tbtn" id="tCase" style="left:22px;top:22px;width:52px;height:52px">ケース</button>
   <button class="tbtn hidden" id="tTrade">商人と取引</button>
+  <button class="tbtn hidden" id="tLook">調べる</button>
+  <button class="tbtn" id="tMenu" style="left:84px;top:22px;width:52px;height:52px">メニュー</button>
   <button class="tbtn hidden" id="tNext" style="left:50%;top:22px;width:auto;height:auto;padding:10px 18px;border-radius:4px;transform:translateX(-50%)">次の章へ</button>
 </div>
 <div id="glass"></div>
