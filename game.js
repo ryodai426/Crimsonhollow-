@@ -3818,8 +3818,8 @@ function buildCine() {
   // cast: the hero (same look as in play) and two pilots
   const hero = makeHumanoid(heroLook());
   const docAt = grp(hero.armR.hand, 0, -0.06, 0.06); docAt.rotation.x = -1.1;
-  // he holds the board by its near right corner (the edge toward him), so the hand never covers the circled village at the top
-  const doc = grp(docAt, -0.09, 0.2, 0);
+  // he holds the board by its lower edge, near the corner (the map stands upright for him), so the hand never covers the circled village at the top
+  const doc = grp(docAt, -0.09, -0.06, 0); doc.rotation.z = Math.PI;
   part(doc, 0.24, 0.32, 0.015, mat(0x2a2a26), 0, 0, 0); cine.docPaper = part(doc, 0.21, 0.28, 0.005, mat(0xd8d2c0), 0, 0, 0.01); cine.doc = doc; part(doc, 0.12, 0.04, 0.004, mat(0x8a1a12), -0.03, 0.15, 0.014);
   const copilot = makeHumanoid(pilotLook(0x4a5038)), pilot = makeHumanoid(pilotLook(0x464c36));
   addHelmet(copilot); addHelmet(pilot);
@@ -3988,7 +3988,7 @@ function cabinShake(T) {
 const C1 = 7, C2 = 14, C3 = 25, C4 = 31, C6 = 45, C7 = 51.5, C_END = 83.5; // cut 2 at 7 s, cut 3 at 14 s, cut 4 at 25 s, cut 5 at 31 s, cut 6 at 45 s, cut 7 at 51.5 s
 const _qq = new THREE.Quaternion();
 const CUT6 = { x: 0.95, y: 0.03, z: 0.26, ly: -0.12, fov: 42 }; // cut 6: camera relative to his head
-const CUT5 = { pov: 0, dist: 0.45, up: 0.1, side: -0.3, toHand: 0.25 }; // cut 5: where the camera sits relative to the map paper
+const CUT5 = { pov: 0, dist: 0.45, up: 0.1, side: 0.3, toHand: 0.25 }; // cut 5: where the camera sits relative to the map paper
 const COCKPIT_CAM = new V3(0.05, 1.5, -2.02), COCKPIT_LOOK = new V3(-0.25, 1.05, 1.4); // cut 4 (inside the cockpit, looking back)
 const MOVIES = {
   stage1: {
@@ -4065,7 +4065,7 @@ const MOVIES = {
       // he faces +x (the right wall); the camera is in front of his face, a little low and toward the cockpit side
       // his face and the map in his hand; the camera sits on the rear side so his turn toward the cockpit reads as a profile
       cineCam.position.set(H.x + CUT6.x + v.x * 0.5, H.y + CUT6.y + v.y * 0.5, H.z + CUT6.z - t * 0.01); cineCam.lookAt(H.x + 0.12, H.y + CUT6.ly, H.z); cineCam.rotateZ(v.roll * 0.5); cine.fov = CUT6.fov; },
-    // カット7（32秒）：村の入り口。降りる → 会話 → 敬礼 → 離陸 → ソニックブーム → ミサイル2発 → 墜落 → 驚くカーヴァー →「不吉な予感がする…。」
+    // カット7（32秒）：村の入り口。降りる → 会話 → うなずく操縦士たち → 離陸 → ソニックブーム → ミサイル2発 → 墜落 → 驚くカーヴァー →「不吉な予感がする…。」
     cut7(t) {
       cineScene.fog.color.setHex(0x6a4228); cineScene.fog.density = 0.022; cineScene.background.setHex(0x7a4a2e);
       const V = cine.vil.position, s = heli7(t), vh = cine.vh;
@@ -4093,14 +4093,14 @@ const MOVIES = {
       p.hx = (p.hx || 0) + 0.28 * Math.sin(Math.PI * seg(t, 8.2, 8.9)); // the nod
       if (flinch > 0) Object.assign(p, { lsx: FLINCH.sx * flinch, rsx: FLINCH.sx * 1.05 * flinch, lex: FLINCH.ex * flinch, rex: FLINCH.ex * 0.95 * flinch, lsz: FLINCH.sz * flinch, rsz: -FLINCH.sz * flinch, tx: -0.12 * flinch, hx: (p.hx || 0) + 0.1 * flinch });
       setPose(hero, p); hero.root.updateMatrixWorld(true);
-      // ---- the crew: look over at him, speak, salute ----
-      const sal = easeIO(seg(t, 10.3, 10.9)) * (1 - easeIO(seg(t, 13.0, 13.6)));
+      // ---- the crew: look over at him, speak, nod ----
+      // after "ご武運を" both give him a small nod (the co-pilot first, the pilot a beat later)
       for (const [h, who] of [[cine.vpilot, 0], [cine.vcopilot, 1]]) {
         const q = SEAT(); Object.assign(q, { rsx: -0.6, rex: -0.8, lsx: -0.5, lex: -0.95 });
         const watch = easeIO(seg(t, 2.5, 3.5)) * (1 - easeIO(seg(t, 13.6, 14.4)));
         q.hy = (who ? 0.9 : 0.65) * watch; q.ty = 0.2 * watch;
         q.hx = who ? talk(t, 9.0, 10.6) : talk(t, 4.4, 8.0);
-        if (sal > 0) Object.assign(q, { rsx: lerp(q.rsx, -2.5, sal), rex: lerp(q.rex, -2.2, sal), rsz: -0.35 * sal, hy: q.hy * (1 - sal * 0.5) });
+        const n0 = who ? 10.7 : 11.0; q.hx += 0.3 * Math.sin(Math.PI * seg(t, n0, n0 + 0.7)); q.tx = 0.06 * Math.sin(Math.PI * seg(t, n0, n0 + 0.7));
         setPose(h, q);
       }
       // ---- cameras ----
@@ -4109,7 +4109,7 @@ const MOVIES = {
         cineCam.position.set(V.x - 10.5, 1.7, -3.2); cineCam.lookAt(V.x + 0.5, 1.6, 0.2); cine.fov = 60;
       } else if (t < 10.6) { // B: over his shoulder, toward the co-pilot behind the glass
         cineCam.position.set(V.x + x - fx * 1.9 + fz * 0.95, 1.95, z - fz * 1.9 - fx * 0.95); cineCam.lookAt(V.x + 2.0, 1.4, 3.4); cine.fov = 46;
-      } else if (t < 13.6) { // C: the salute, through the windscreen
+      } else if (t < 13.6) { // C: the crew nod to him, through the windscreen
         cineCam.position.set(V.x + 5.4, 1.75, 4.2); cineCam.lookAt(V.x + 2.0, 1.4, 4.0); cine.fov = 44;
       } else if (t < 19.4) { // D: from behind him, the helicopter climbs away from him
         const k = easeIO(seg(t, 13.6, 19.4)); cineCam.position.set(V.x + x - fx * 2.2 + 0.3, 0.9, z - fz * 2.2 - 0.6);
