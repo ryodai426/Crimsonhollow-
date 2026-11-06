@@ -395,7 +395,8 @@ function buildTitleScene() {
   // the light: a caged fluorescent fixture hanging at the top of the frame
   const fx = new THREE.Group(); fx.position.set(0.3, 5.4, -2.2); titleScene.add(fx);
   fx.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 0.42), new THREE.MeshStandardMaterial({ color: 0x2a2a28, metalness: 0.6, roughness: 0.4 })));
-  titleFx.panel = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.04, 0.24), new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0xfff2d6, emissiveIntensity: 2 }));
+  // the cover glows a cool, old-tube green so it doesn't blend into the cream title lettering
+  titleFx.panel = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.04, 0.24), new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0x7fd8b8, emissiveIntensity: 1.2 }));
   titleFx.panel.position.y = -0.08; fx.add(titleFx.panel);
   for (const sx of [-0.7, 0.7]) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.02, 2, 0.02), new THREE.MeshStandardMaterial({ color: 0x1a1a1a })); c.position.set(sx, 1.0, 0); fx.add(c); }
   const spot = new THREE.SpotLight(0xffeccc, 85, 22, 0.9, 0.65, 1.2);
@@ -422,7 +423,7 @@ function updateTitleScene(dt) {
   let target = 1 + Math.sin(f.t * 47) * 0.015 + (Math.random() - 0.5) * 0.02;
   if (f.seq.length) { f.seq[0][0] -= dt; target = f.seq[0][1]; if (f.seq[0][0] <= 0) f.seq.shift(); }
   f.k = target;
-  f.light.intensity = 85 * f.k; f.fill.intensity = 2.5 * f.k; f.panel.material.emissiveIntensity = 2 * f.k; f.cone.material.opacity = 0.012 * f.k;
+  f.light.intensity = 85 * f.k; f.fill.intensity = 2.5 * f.k; f.panel.material.emissiveIntensity = 1.2 * f.k; f.cone.material.opacity = 0.012 * f.k;
   document.documentElement.style.setProperty('--flick', f.k.toFixed(3));
   const p = f.dust.geometry.attributes.position; for (let i = 0; i < p.count; i++) { let y = p.getY(i) - dt * 0.05; if (y < 0.1) y = 5; p.setY(i, y); p.setX(i, p.getX(i) + Math.sin(f.t * 0.5 + i) * dt * 0.02); } p.needsUpdate = true;
   titleCam.position.set(Math.sin(f.t * 0.13) * 0.18, 2.2 + Math.sin(f.t * 0.21) * 0.05, 5.2);
