@@ -14,6 +14,11 @@ function angDiff(a, b) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; wh
 const dampAng = (a, b, k, dt) => a + angDiff(a, b) * (1 - Math.exp(-k * dt));
 const isTouch = matchMedia('(pointer: coarse)').matches;
 const lowQ = /[?&]low/.test(location.search);
+// Demo build (the one deployed for play-testing): STAGE 2 - the city and the police station - is drawn a little
+// brighter so it is easier to check. The product version keeps the darker look: add ?full to the URL to preview it,
+// and for release change this line to `const DEMO = false;`.
+const DEMO = !/[?&]full\b/.test(location.search);
+const DEMO_BRIGHT_STAGES = ['city', 'station', 'stationIn'];
 // PlayStation-style rendering (the only mode)
 const PSX = true;
 {
@@ -175,12 +180,14 @@ function setAtmos(name, instant) {
   if (instant || !atm.cur) { atm.cur = v; atm.from = v; atm.to = v; atm.t = 1; applyAtmos(v); return; }
   atm.from = atm.cur; atm.to = v; atm.t = 0;
 }
+let demoLift = false; // set by buildStage for the stages in DEMO_BRIGHT_STAGES
 function applyAtmos(v) {
+  const L = demoLift; // demo: a bit more exposure and ambient light, slightly thinner fog (same colours)
   skyUni.top.value.copy(v.sky[0]); skyUni.mid.value.copy(v.sky[1]); skyUni.bot.value.copy(v.sky[2]);
-  scene.fog.color.copy(v.fog); scene.fog.density = v.dens * (PSX ? 1.35 : 1);
-  hemi.color.copy(v.hs); hemi.groundColor.copy(v.hg); hemi.intensity = v.hi;
+  scene.fog.color.copy(v.fog); scene.fog.density = v.dens * (PSX ? 1.35 : 1) * (L ? 0.85 : 1);
+  hemi.color.copy(v.hs); hemi.groundColor.copy(v.hg); hemi.intensity = v.hi * (L ? 1.35 : 1);
   sun.color.copy(v.sc); sun.intensity = v.si; sunDir.copy(v.dir);
-  renderer.toneMappingExposure = v.exp;
+  renderer.toneMappingExposure = v.exp * (L ? 1.25 : 1);
   charUni.charLift.value = 0.1 * v.vis;
   charUni.charRim.value.copy(v.hs).multiplyScalar(0.2 * v.vis);
 }
@@ -2241,7 +2248,7 @@ function clearWorld() {
   for (const d of decals) scene.remove(d); decals.length = 0;
 }
 function buildStage(id) {
-  clearWorld(); STAGE = STAGES[id]; STAGE.build();
+  clearWorld(); STAGE = STAGES[id]; STAGE.build(); demoLift = DEMO && DEMO_BRIGHT_STAGES.includes(id);
   START_POS.set(STAGE.start[0], 0, STAGE.start[1]); TRADER_POS.set(STAGE.trader[0], 0, STAGE.trader[1]);
   trader.h.root.position.copy(TRADER_POS);
   setAtmos(STAGE.waves[0].atmos, true); rain.visible = false;
